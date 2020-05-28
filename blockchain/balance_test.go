@@ -5,6 +5,7 @@ package blockchain
 
 import (
 	"github.com/AsimovNetwork/asimov/asiutil"
+	"github.com/AsimovNetwork/asimov/blockchain/txo"
 	"github.com/AsimovNetwork/asimov/chaincfg"
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/database"
@@ -25,7 +26,7 @@ func TestCalculateBalance(t *testing.T) {
 		{0x66,0x3c,0xf8,0xb8,0x65,0xf2,0xf7,0xe5,0x22,0xff,0x63,0x90,0x59,0xe0,0xa4,0x37,0xc8,0x49,0xee,0x5a,0xb0,},
 	}
 
-	var testAsset = []protos.Assets{
+	var testAsset = []protos.Asset{
 		{0,0},
 		{1,1},
 	}
@@ -50,11 +51,11 @@ func TestCalculateBalance(t *testing.T) {
 		if err != nil {
 			t.Errorf("create block error %v", err)
 		}
-		view := NewUtxoViewpoint()
+		view := txo.NewUtxoViewpoint()
 		txNums := len(block.MsgBlock().Transactions)
 		for k:=0; k<txNums; k++ {
 			tx := asiutil.NewTx(block.MsgBlock().Transactions[k])
-			_ = view.AddTxOuts(tx, block.Height())
+			_ = view.AddTxOuts(tx.Hash(), tx.MsgTx(), false, block.Height())
 		}
 
 		err = chain.db.Update(func(dbTx database.Tx) error {
@@ -82,13 +83,13 @@ func TestCalculateBalance(t *testing.T) {
 	}
 
 	tests := []struct {
-		addr 		common.Address
-		assets 		*protos.Assets
-		voucherId 	int64
-		ErrStr 		string
+		addr          common.Address
+		asset         *protos.Asset
+		voucherId     int64
+		ErrStr        string
 		resultBalance int64
 	} {
-		//input assets is nil
+		//input asset is nil
 		{
 			testBookkeepers[0],
 			nil,
@@ -96,7 +97,7 @@ func TestCalculateBalance(t *testing.T) {
 			"",
 			0,
 		},
-		//input Divisible assets
+		//input Divisible asset
 		{
 			testBookkeepers[0],
 			&testAsset[0],
@@ -104,7 +105,7 @@ func TestCalculateBalance(t *testing.T) {
 			"",
 			resultAmount[0],
 		},
-		//input inDivisible assets
+		//input inDivisible asset
 		{
 			testBookkeepers[0],
 			&testAsset[1],
@@ -112,7 +113,7 @@ func TestCalculateBalance(t *testing.T) {
 			"",
 			resultAmount[1],
 		},
-		//input inDivisible assets
+		//input inDivisible asset
 		{
 			testBookkeepers[0],
 			&testAsset[1],
@@ -120,7 +121,7 @@ func TestCalculateBalance(t *testing.T) {
 			"",
 			resultAmount[2],
 		},
-		//input inDivisible assets
+		//input inDivisible asset
 		{
 			testBookkeepers[0],
 			&testAsset[1],
@@ -140,7 +141,7 @@ func TestCalculateBalance(t *testing.T) {
 
 	for i, input := range tests {
 		t.Logf("==========test case %d==========", i)
-		balance, err := chain.CalculateBalance(block, input.addr, input.assets, input.voucherId)
+		balance, err := chain.CalculateBalance(nil, block, input.addr, input.asset, input.voucherId)
 		if err != nil {
 			t.Errorf("tests #%d error: %v", i, err)
 		} else {

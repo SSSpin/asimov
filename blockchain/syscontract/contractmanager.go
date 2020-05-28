@@ -11,6 +11,7 @@ import (
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/protos"
 	"github.com/AsimovNetwork/asimov/vm/fvm"
+	"sync"
 )
 
 // Manager defines an contract manager that manages multiple system contracts and
@@ -20,8 +21,10 @@ type Manager struct {
 	chain fvm.ChainContext
 	// genesis transaction data cache
 	genesisDataCache map[common.ContractCode][]chaincfg.ContractInfo
+
 	// unrestricted assets cache
-	assetsUnrestrictedCache map[protos.Assets]struct{}
+	assetsUnrestrictedMtx   sync.Mutex
+	assetsUnrestrictedCache map[protos.Asset]struct{}
 }
 
 // Init manager by genesis data.
@@ -33,7 +36,7 @@ func (m *Manager) Init(chain fvm.ChainContext, dataBytes [] byte) error {
 	}
 	m.chain = chain
 	m.genesisDataCache = cMap
-	m.assetsUnrestrictedCache = make(map[protos.Assets]struct{})
+	m.assetsUnrestrictedCache = make(map[protos.Asset]struct{})
 	return nil
 }
 

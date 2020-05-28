@@ -295,15 +295,15 @@ func (s *PublicRpcAPI) getBalance(address string) ([]rpcjson.GetBalanceResult, e
 		return nil, internalRPCError(err.Error(), "Failed to decode string address")
 	}
 
-	view := blockchain.NewUtxoViewpoint()
+	view := txo.NewUtxoViewpoint()
 	assetsMap := make(map[string]int64)
 	balance := make([]rpcjson.GetBalanceResult, 0)
 
 	_, err = s.cfg.Chain.FetchUtxoViewByAddress(view, byte)
 	if err == nil {
 		for _, e := range view.Entries() {
-			assets := hex.EncodeToString(e.Assets().Bytes())
-			if e.Assets().IsIndivisible() {
+			assets := hex.EncodeToString(e.Asset().Bytes())
+			if e.Asset().IsIndivisible() {
 				b := rpcjson.GetBalanceResult{
 					Asset: assets,
 					Value: strconv.FormatInt(e.Amount(), 10),
@@ -359,15 +359,19 @@ func (s *PublicRpcAPI) GetBalances(addresses []string) (interface{}, error) {
 	return result, nil
 }
 
-func getBlockListByHashes(s *PublicRpcAPI, blkHashes []common.Hash) (interface{}, error) {
+func (s *PublicRpcAPI) GetBlockListByHeight(offset int32, count int32) (interface{}, error) {
 	resultBlocks := make([]rpcjson.GetBlockVerboseResult, 0)
-	best := s.cfg.Chain.BestSnapshot()
 
-	for _, hash := range blkHashes {
-		block, vBlock, err := asiutil.GetBlockPair(s.cfg.DB, &hash)
+	best := s.cfg.Chain.BestSnapshot()
+	for i := int32(0); i < count; i++ {
+		hash, err := s.cfg.Chain.BlockHashByHeight(offset + i)
+		if err != nil {
+			break
+		}
+		block, vBlock, err := asiutil.GetBlockPair(s.cfg.DB, hash)
 		if err != nil {
 			if _, ok := err.(asiutil.MissVBlockError); ok && hash.IsEqual(chaincfg.ActiveNetParams.GenesisHash) {
-				vBlock = asiutil.NewVBlock(&protos.MsgVBlock{}, &hash)
+				vBlock = asiutil.NewVBlock(&protos.MsgVBlock{}, hash)
 			} else {
 				context := "Failed to get block"
 				return nil, internalRPCError(err.Error(), context)
@@ -387,11 +391,11 @@ func getBlockListByHashes(s *PublicRpcAPI, blkHashes []common.Hash) (interface{}
 			totalRewardValue = tmpReward
 			for _, txOut := range block.MsgBlock().Transactions[0].TxOut {
 				v := txOut.Value
-				if txOut.Assets.Equal(&asiutil.FlowCoinAsset) {
+				if txOut.Asset.Equal(&asiutil.AsimovAsset) {
 					v -= tmpReward
 				}
 				if v > 0 {
-					totalFees.Asset = hex.EncodeToString(txOut.Assets.Bytes())
+					totalFees.Asset = hex.EncodeToString(txOut.Asset.Bytes())
 					totalFees.Value = v
 					FeesList = append(FeesList, totalFees)
 				}
@@ -400,7 +404,7 @@ func getBlockListByHashes(s *PublicRpcAPI, blkHashes []common.Hash) (interface{}
 
 		var receipts types.Receipts
 		rawTxns := make([]rpcjson.TxResult, 0)
-		receipts = rawdb.ReadReceipts(s.cfg.Chain.EthDB(), hash, uint64(header.Height))
+		receipts = rawdb.ReadReceipts(s.cfg.Chain.EthDB(), *hash, uint64(header.Height))
 
 		for _, tx := range block.MsgBlock().Transactions {
 			rawTxn, err := createTxResult(*s.cfg, tx,
@@ -436,11 +440,9 @@ func getBlockListByHashes(s *PublicRpcAPI, blkHashes []common.Hash) (interface{}
 		var nextHashString string
 		if header.Height < best.Height {
 			nextHash, err := s.cfg.Chain.BlockHashByHeight(header.Height + 1)
-			if err != nil {
-				context := "Failed to obtain next block"
-				return nil, internalRPCError(err.Error(), context)
+			if err == nil {
+				nextHashString = nextHash.String()
 			}
-			nextHashString = nextHash.String()
 		}
 
 		blockReply := rpcjson.GetBlockVerboseResult{
@@ -465,27 +467,11 @@ func getBlockListByHashes(s *PublicRpcAPI, blkHashes []common.Hash) (interface{}
 			FeeList:       FeesList,
 		}
 		resultBlocks = append(resultBlocks, blockReply)
-	}
-	return resultBlocks, nil
-}
-
-func (s *PublicRpcAPI) GetBlockListByHeight(offset int32, count int32) (interface{}, error) {
-	// Load the raw block bytes from the database.
-	best := s.cfg.Chain.BestSnapshot()
-	var blkHashes []common.Hash
-	for i := int32(0); i < int32(count); i++ {
-		if offset+i > best.Height {
+		if len(nextHashString) == 0 {
 			break
 		}
-		blockHash, err := s.cfg.Chain.BlockHashByHeight(offset + i)
-		if err != nil {
-			fmt.Println(err.Error())
-			continue
-		}
-
-		blkHashes = append(blkHashes, *blockHash)
 	}
-	return getBlockListByHashes(s, blkHashes)
+	return resultBlocks, nil
 }
 
 func (s *PublicRpcAPI) makeupUTXO(out protos.OutPoint, e *txo.UtxoEntry, addr *common.Address) (*rpcjson.ListUnspentResult) {
@@ -493,7 +479,7 @@ func (s *PublicRpcAPI) makeupUTXO(out protos.OutPoint, e *txo.UtxoEntry, addr *c
 	r := &rpcjson.ListUnspentResult{
 		TxID:          out.Hash.UnprefixString(),
 		Vout:          out.Index,
-		Assets:        hex.EncodeToString(e.Assets().Bytes()),
+		Assets:        hex.EncodeToString(e.Asset().Bytes()),
 		ScriptPubKey:  hex.EncodeToString(e.PkScript()),
 		Amount:        e.Amount(),
 		Address:       addr.String(),
@@ -516,7 +502,7 @@ func (s *PublicRpcAPI) makeupUTXO(out protos.OutPoint, e *txo.UtxoEntry, addr *c
 // Get list of UTXO of a given asset for all address in the array.
 // If asset is not specified, all assets will be fetched.
 func (s *PublicRpcAPI) GetUtxoByAddress(addresses []string, asset string) (interface{}, error) {
-	var a protos.Assets
+	var a protos.Asset
 	if asset != "" {
 		aa, err := hex.DecodeString(asset)
 		if err != nil {
@@ -538,7 +524,7 @@ func (s *PublicRpcAPI) GetUtxoByAddress(addresses []string, asset string) (inter
 			return nil, internalRPCError(err.Error(), "Failed to create ADDRESS object")
 		}
 
-		view := blockchain.NewUtxoViewpoint()
+		view := txo.NewUtxoViewpoint()
 		_, err = s.cfg.Chain.FetchUtxoViewByAddress(view, addr.ScriptAddress())
 		if err == nil {
 			count := uint32(0)
@@ -549,7 +535,7 @@ func (s *PublicRpcAPI) GetUtxoByAddress(addresses []string, asset string) (inter
 					break
 				}
 
-				if asset == "" || e.Assets().Equal(&a) {
+				if asset == "" || e.Asset().Equal(&a) {
 					r := s.makeupUTXO(out, e, addr)
 					utxos = append(utxos, r)
 				}
@@ -614,7 +600,7 @@ func quickSort(arr []*tempItem) {
 // If asset is not specified, all assets will be fetched.
 // The qualified UTXO is sorted and the page [from, from+count] will be retrieved.
 func (s *PublicRpcAPI) GetUtxoInPage(address string, asset string, from, count int32) (interface{}, error) {
-	var a protos.Assets
+	var a protos.Asset
 	if asset != "" {
 		aa, err := hex.DecodeString(asset)
 		if err != nil {
@@ -632,7 +618,7 @@ func (s *PublicRpcAPI) GetUtxoInPage(address string, asset string, from, count i
 	}
 
 	utxos := make([]*rpcjson.ListUnspentResult, 0, count)
-	view := blockchain.NewUtxoViewpoint()
+	view := txo.NewUtxoViewpoint()
 	_, err = s.cfg.Chain.FetchUtxoViewByAddress(view, addr.ScriptAddress())
 	if err != nil {
 		return nil, internalRPCError(err.Error(), "Failed to get utxo in page")
@@ -653,7 +639,7 @@ func (s *PublicRpcAPI) GetUtxoInPage(address string, asset string, from, count i
 	for i := int(0); i < len(tempList); i++ {
 		e := tempList[i].entry
 		out := tempList[i].outPoint
-		if asset == "" || e.Assets().Equal(&a) {
+		if asset == "" || e.Asset().Equal(&a) {
 			idx++
 			if idx <= from || idx > from+count {
 				continue
@@ -817,21 +803,22 @@ func (s *PublicRpcAPI) CreateRawTransaction(inputs []rpcjson.TransactionInput, o
 
 				caller := addresses[0].StandardAddress()
 
-				category, templateName, constructor, ok := blockchain.DecodeCreateContractData(data)
+				category, templateName, _, ok := blockchain.DecodeCreateContractData(data)
 				block, stateDB, ok := getBlockInfo(s)
 				if !ok {
 					context := "Failed to get block info"
 					return nil, internalRPCError(err.Error(), context)
 				}
 
-				byteCode, ok, _ := s.cfg.Chain.GetByteCode(nil, block, common.SystemContractReadOnlyGas,
+				_, ok, _ = s.cfg.Chain.GetByteCode(nil, block, common.SystemContractReadOnlyGas,
 					stateDB, chaincfg.ActiveNetParams.FvmParam, category, templateName)
 				if !ok {
 					context := "Incorrect data protocol"
 					return nil, internalRPCError("Contract data is invalid.", context)
 				}
 				inputHash := asiutil.GenInputHash(mtx)
-				cAddress, err := crypto.CreateContractAddress(caller[:], append(byteCode, constructor...), inputHash)
+				// cAddress, err := crypto.CreateContractAddress(caller[:], append(byteCode, constructor...), inputHash)
+				cAddress, err := crypto.CreateContractAddress(caller[:], []byte{}, inputHash)
 
 				if err != nil {
 					context := "Failed to generate contract address"
@@ -1242,10 +1229,10 @@ func (s *PublicRpcAPI) Call(callerAddress string, contractAddress string, data s
 	fmt.Println(contractAddr)
 	fmt.Println(data)
 
-	context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, nil, nil)
+	context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, nil)
 	vmInstance := vm.NewFVM(context, stateDB, chaincfg.ActiveNetParams.FvmParam, *chain.GetVmConfig())
 
-	var assets *protos.Assets
+	var assets *protos.Asset
 	if asset != "" {
 		assetBytes := common.Hex2Bytes(asset)
 		assets = protos.AssetFromBytes(assetBytes)
@@ -1345,7 +1332,7 @@ func (s *PublicRpcAPI) Test(callerAddress string, byteCode string, argStr string
 		inputHash := []byte(idxStr)
 		caller := vm.AccountRef(callerAddr)
 		amount := big.NewInt(0)
-		asset := &asiutil.FlowCoinAsset
+		asset := &asiutil.AsimovAsset
 		if callData.Caller != "" {
 			callerBytes, err := hexutil.Decode(callData.Caller)
 			if err != nil {
@@ -1374,12 +1361,12 @@ func (s *PublicRpcAPI) Test(callerAddress string, byteCode string, argStr string
 		}
 
 		stateDB, _ = state.New(common.Hash(block.MsgBlock().Header.StateRoot), chain.GetStateCache())
-		context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, voteValueFunc, nil)
+		context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, voteValueFunc)
 		vmInstance := vm.NewFVM(context, stateDB, chaincfg.ActiveNetParams.FvmParam, *chain.GetVmConfig())
 
 		_, contractAddr, _, _, err := vmInstance.Create(
 			vm.AccountRef(callerAddr), byteCodeHash, uint64(1000000000), big.NewInt(0),
-			&asiutil.FlowCoinAsset, inputHash, argHash, false)
+			&asiutil.AsimovAsset, inputHash, argHash, false)
 
 		if err != nil {
 			return nil, err
@@ -1475,7 +1462,7 @@ func (s *PublicRpcAPI) EstimateGas(caller string, contractAddress string, amount
 	}
 
 	stateDB, _ = state.New(common.Hash(header.StateRoot), chain.GetStateCache())
-	context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, voteValueFunc, nil)
+	context := fvm.NewFVMContext(callerAddr, new(big.Int).SetInt64(1), block, chain, nil, voteValueFunc)
 	vmInstance := vm.NewFVM(context, stateDB, chaincfg.ActiveNetParams.FvmParam, *chain.GetVmConfig())
 	leftOverGas := uint64(1000000000)
 
@@ -1559,7 +1546,7 @@ func (s *PublicRpcAPI) RunTransaction(hexTx string, utxos []*rpcjson.ListUnspent
 		tx.TxContract.GasLimit = 100000000
 	}
 
-	view := blockchain.NewUtxoViewpoint()
+	view := txo.NewUtxoViewpoint()
 	if utxos != nil {
 		var lockItem *txo.LockItem
 		for _, utxo := range utxos {
@@ -1631,7 +1618,7 @@ func (s *PublicRpcAPI) RunTransaction(hexTx string, utxos []*rpcjson.ListUnspent
 			vout := &result.VTX.Vout[i]
 			vout.Value = out.Value
 			vout.ScriptPubKey.Hex = hex.EncodeToString(out.PkScript)
-			vout.Asset = hex.EncodeToString(out.Assets.Bytes())
+			vout.Asset = hex.EncodeToString(out.Asset.Bytes())
 		}
 	}
 
@@ -2403,7 +2390,7 @@ func (s *PublicRpcAPI) GetFeeList() (interface{}, error) {
 		return nil, internalRPCError(err.Error(), "Failed to get stateDB")
 	}
 
-	fees, err, _ := s.cfg.ContractMgr.GetFees(block,
+	fees, err := s.cfg.ContractMgr.GetFees(block,
 		stateDB, chaincfg.ActiveNetParams.FvmParam)
 	if err != nil {
 		return nil, internalRPCError(err.Error(), "Failed to get fees")
@@ -2413,7 +2400,7 @@ func (s *PublicRpcAPI) GetFeeList() (interface{}, error) {
 	for assets, height := range fees {
 		feeList = append(feeList, rpcjson.FeeItemResult{Assets: hex.EncodeToString(assets.Bytes()), Height: height})
 	}
-	feeList = append(feeList, rpcjson.FeeItemResult{Assets:hex.EncodeToString(asiutil.FlowCoinAsset.Bytes()), Height:0})
+	feeList = append(feeList, rpcjson.FeeItemResult{Assets:hex.EncodeToString(asiutil.AsimovAsset.Bytes()), Height:0})
 	return feeList, nil
 }
 
@@ -2597,7 +2584,7 @@ func (s *PublicRpcAPI) GetMergeUtxoStatus(address string, mergeCount int32) ([]r
 	}
 
 	addUtxoCnt := int32(0)
-	view := blockchain.NewUtxoViewpoint()
+	view := txo.NewUtxoViewpoint()
 	assetsMap := make(map[string]int64)
 	preOutMap := make(map[string][]protos.OutPoint)
 	assetBalance := make([]rpcjson.GetMergeUtxoResult, 0)
@@ -2609,8 +2596,8 @@ func (s *PublicRpcAPI) GetMergeUtxoStatus(address string, mergeCount int32) ([]r
 				if addUtxoCnt >= 600 {
 					break
 				}
-				assets := hex.EncodeToString(e.Assets().Bytes())
-				if !e.Assets().IsIndivisible() {
+				assets := hex.EncodeToString(e.Asset().Bytes())
+				if !e.Asset().IsIndivisible() {
 					findSpentInTxPool := false
 					for _, spentPreOut := range hasSpentInTxPool {
 						if spentPreOut == preOut {
@@ -2692,9 +2679,9 @@ func (s *PublicRpcAPI) GetSignUpStatus(address string) (interface{}, error) {
 	balance := int64(0)
 	prevOutsList := make([]protos.OutPoint, 0)
 	if createSignUpFlag {
-		view := blockchain.NewUtxoViewpoint()
+		view := txo.NewUtxoViewpoint()
 		var prevOuts *[]protos.OutPoint
-		prevOuts, err = chain.FetchUtxoViewByAddressAndAsset(view, addr.ScriptAddress(), &asiutil.FlowCoinAsset)
+		prevOuts, err = chain.FetchUtxoViewByAddressAndAsset(view, addr.ScriptAddress(), &asiutil.AsimovAsset)
 		if err != nil {
 			context := "Failed to fetch utxo View by addr and asset"
 			return nil, internalRPCError(err.Error(), context)
@@ -2742,14 +2729,15 @@ func (s *PublicRpcAPI) GetBlockTemplate(privkey string, round uint32, slotIndex 
 	}
 
 	// 5 seconds
-	blockInteval := 5.0 * 1000
-	block, err := s.cfg.BlockTemplateGenerator.ProduceNewBlock(acc,
-		common.GasFloor, common.GasCeil, round, slotIndex, blockInteval)
+	blockInteval := 5.0 * 100000
+	template, err := s.cfg.BlockTemplateGenerator.ProduceNewBlock(acc,
+		common.GasFloor, common.GasCeil,
+		time.Now().Unix(), round, slotIndex, blockInteval)
 	if err != nil {
 		return nil, internalRPCError(err.Error(), "failed to get block template")
 	}
-	w := bytes.NewBuffer(make([]byte, 0, block.MsgBlock().SerializeSize()))
-	block.MsgBlock().Serialize(w)
+	w := bytes.NewBuffer(make([]byte, 0, template.Block.MsgBlock().SerializeSize()))
+	template.Block.MsgBlock().Serialize(w)
 	return hexutil.Encode(w.Bytes()), nil
 }
 

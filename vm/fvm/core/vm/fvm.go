@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/AsimovNetwork/asimov/asiutil"
+	"github.com/AsimovNetwork/asimov/blockchain/txo"
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/crypto"
 	"github.com/AsimovNetwork/asimov/protos"
@@ -37,14 +38,14 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 
 type (
 	// Check whether a transfer can happen
-	CanTransferFunc func(*asiutil.Block, StateDB, common.Address, *big.Int, *virtualtx.VirtualTransaction, CalculateBalanceFunc, *protos.Assets) bool
+	CanTransferFunc func(*txo.UtxoViewpoint, *asiutil.Block, StateDB, common.Address, *big.Int, *virtualtx.VirtualTransaction, CalculateBalanceFunc, *protos.Asset) bool
 	// Transfer asset
-	TransferFunc func(StateDB, common.Address, common.Address, *big.Int, *virtualtx.VirtualTransaction, *protos.Assets)
+	TransferFunc func(StateDB, common.Address, common.Address, *big.Int, *virtualtx.VirtualTransaction, *protos.Asset)
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH FVM op code.
 	GetHashFunc func(uint64) common.Hash
 	// Calculate balance
-	CalculateBalanceFunc func(block *asiutil.Block, address common.Address, assets *protos.Assets, voucherId int64) (int64, error)
+	CalculateBalanceFunc func(view *txo.UtxoViewpoint, block *asiutil.Block, address common.Address, assets *protos.Asset, voucherId int64) (int64, error)
 	// Get template warehouse information
 	GetTemplateWarehouseInfoFunc func() (common.Address, string)
 	// Pack function arguments
@@ -54,7 +55,7 @@ type (
 	// Get system contract information
 	GetSystemContractInfoFunc func(delegateAddr common.ContractCode) (common.Address, []byte, string)
 	// Fetch a given template from template warehouse
-	FetchTemplateFunc func(txs map[common.Hash]asiutil.TxMark, hash *common.Hash) (uint16, []byte, []byte, []byte, []byte, error)
+	FetchTemplateFunc func(txs map[common.Hash]txo.TxMark, hash *common.Hash) (uint16, []byte, []byte, []byte, []byte, error)
 	// Get vote value
 	VoteValueFunc func() int64
 )
@@ -116,9 +117,7 @@ type Context struct {
 	Time        *big.Int       // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
 	Block       *asiutil.Block // Block contains a balance cache which used in vm.
-	// TxsMap is a reference from UtxoViewPoint. It stores latest (or disconnected) txs
-	// which may contain template.
-	TxsMap map[common.Hash]asiutil.TxMark
+	View        *txo.UtxoViewpoint // Provides UtxoViewPoint
 }
 
 // FVM is the Asimov Virtual Machine base object and provides
@@ -205,7 +204,7 @@ func (fvm *FVM) Interpreter() Interpreter {
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (fvm *FVM) Call(caller ContractRef, addr common.Address, input []byte,
-	gas uint64, value *big.Int, assets *protos.Assets,
+	gas uint64, value *big.Int, asset *protos.Asset,
 	doTransfer bool) (ret []byte, leftOverGas uint64, snapshot int, err error) {
 	if fvm.vmConfig.NoRecursion && fvm.depth > 0 {
 		return nil, gas, -1, nil
@@ -215,13 +214,8 @@ func (fvm *FVM) Call(caller ContractRef, addr common.Address, input []byte,
 		return nil, gas, -1, ErrDepth
 	}
 
-	// Fail if we're trying to transfer more than the available balance
-	err, leftOverGas = fvm.RegistryCenterCheck(caller, gas, assets)
-	if err != nil {
-		return nil, leftOverGas, -1, err
-	}
-
-	if doTransfer && !fvm.Context.CanTransfer(fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, assets) {
+	leftOverGas = gas
+	if doTransfer && !fvm.Context.CanTransfer(fvm.View, fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, asset) {
 		return nil, leftOverGas, -1, ErrInsufficientBalance
 	}
 
@@ -240,12 +234,12 @@ func (fvm *FVM) Call(caller ContractRef, addr common.Address, input []byte,
 		fvm.StateDB.CreateAccount(addr)
 	}
 	if doTransfer {
-		fvm.Transfer(fvm.StateDB, caller.Address(), to.Address(), value, fvm.Vtx, assets)
+		fvm.Transfer(fvm.StateDB, caller.Address(), to.Address(), value, fvm.Vtx, asset)
 	}
 
 	// Initialise a new contract and set the code that is to be used by the FVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, to, value, leftOverGas, assets)
+	contract := NewContract(caller, to, value, leftOverGas, asset)
 	contract.SetCallCode(&addr, fvm.StateDB.GetCodeHash(addr), fvm.StateDB.GetCode(addr))
 
 	start := time.Now()
@@ -281,7 +275,7 @@ func (fvm *FVM) Call(caller ContractRef, addr common.Address, input []byte,
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (fvm *FVM) CallCode(caller ContractRef, addr common.Address, input []byte,
-	gas uint64, value *big.Int, assets *protos.Assets) (ret []byte, leftOverGas uint64, err error) {
+	gas uint64, value *big.Int, assets *protos.Asset) (ret []byte, leftOverGas uint64, err error) {
 	if fvm.vmConfig.NoRecursion && fvm.depth > 0 {
 		return nil, gas, nil
 	}
@@ -290,12 +284,9 @@ func (fvm *FVM) CallCode(caller ContractRef, addr common.Address, input []byte,
 	if fvm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-	// Fail if we're trying to transfer more than the available balance
-	err, leftOverGas = fvm.RegistryCenterCheck(caller, gas, assets)
-	if err != nil {
-		return nil, leftOverGas, err
-	}
-	if !fvm.CanTransfer(fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, assets) {
+
+	leftOverGas = gas
+	if !fvm.CanTransfer(fvm.View, fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, assets) {
 		return nil, leftOverGas, ErrInsufficientBalance
 	}
 
@@ -381,7 +372,7 @@ func (fvm *FVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// Initialise a new contract and set the code that is to be used by the
 	// FVM. The contract is a scoped environment for this execution context
 	// only.
-	contract := NewContract(caller, to, new(big.Int), gas, protos.NewAssets(protos.DivisibleAssets, protos.DefaultOrgId, protos.DefaultCoinId))
+	contract := NewContract(caller, to, new(big.Int), gas, protos.NewAsset(protos.DivisibleAsset, protos.DefaultOrgId, protos.DefaultCoinId))
 	contract.SetCallCode(&addr, fvm.StateDB.GetCodeHash(addr), fvm.StateDB.GetCode(addr))
 
 	// When an error was returned by the FVM or when setting the creation code
@@ -399,14 +390,14 @@ func (fvm *FVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 
 // create creates a new contract using code as deployment code.
 func (fvm *FVM) create(caller ContractRef, code []byte,
-	gas uint64, value *big.Int, address common.Address, assets *protos.Assets, paramBytes []byte, doTransfer bool) (
+	gas uint64, value *big.Int, address common.Address, assets *protos.Asset, paramBytes []byte, doTransfer bool) (
 	[]byte, common.Address, uint64, int, error) {
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if fvm.depth > int(params.CallCreateDepth) {
 		return nil, common.Address{}, gas, -1, ErrDepth
 	}
-	if doTransfer && !fvm.CanTransfer(fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, assets) {
+	if doTransfer && !fvm.CanTransfer(fvm.View, fvm.Block, fvm.StateDB, caller.Address(), value, fvm.Vtx, fvm.CalculateBalance, assets) {
 		return nil, common.Address{}, gas, -1, ErrInsufficientBalance
 	}
 
@@ -483,7 +474,7 @@ func (fvm *FVM) create(caller ContractRef, code []byte,
 
 // Create creates a new contract using code as deployment code.
 func (fvm *FVM) Create(caller ContractRef, code []byte,
-	gas uint64, value *big.Int, assets *protos.Assets, inputHash []byte, paramBytes []byte, doTransfer bool) (
+	gas uint64, value *big.Int, assets *protos.Asset, inputHash []byte, paramBytes []byte, doTransfer bool) (
 	ret []byte, contractAddr common.Address, leftOverGas uint64, snapshot int, err error) {
 	if paramBytes != nil && !isWasmCode(code) {
 		code = append(code, paramBytes...)
@@ -498,7 +489,7 @@ func (fvm *FVM) Create(caller ContractRef, code []byte,
 	case common.PubKeyHashAddrID:
 		fallthrough
 	case common.ScriptHashAddrID:
-		contractAddr, _ = crypto.CreateContractAddress(caller.Address().Bytes(), code, inputHash)
+		contractAddr, _ = crypto.CreateContractAddress(caller.Address().Bytes(), []byte{}, inputHash)
 	default:
 		return nil, common.Address{}, gas, -1, errors.New("invalid caller address type")
 	}
@@ -519,7 +510,7 @@ func (fvm *FVM) Create(caller ContractRef, code []byte,
 // The different between Create2 with Create is Create2 uses sha3(0xff ++ msg.sender ++ salt ++ sha3(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 func (fvm *FVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *big.Int, salt *big.Int,
-	assets *protos.Assets, checkBalance bool) (
+	assets *protos.Asset, checkBalance bool) (
 	ret []byte, contractAddr common.Address, leftOverGas uint64, snapshot int, err error) {
 	contractAddr = crypto.CreateAddress2(caller.Address(), common.BigToHash(salt), code)
 	return fvm.create(caller, code, gas, endowment, contractAddr, assets, nil, checkBalance)
@@ -527,33 +518,3 @@ func (fvm *FVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 
 // ChainConfig returns the environment's chain configuration
 func (fvm *FVM) ChainConfig() *params.ChainConfig { return fvm.chainConfig }
-
-// Check whether the asset is valid or not.
-func (fvm *FVM) RegistryCenterCheck(caller ContractRef, gas uint64, assets *protos.Assets) (err error, leftOverGas uint64) {
-	if assets == nil || assets.IsFlowCoin() {
-		return nil, gas
-	}
-
-	registryCenterAddr, _, registryCenterABI := fvm.GetSystemContractInfo(common.RegistryCenter)
-	canTransferFunction := common.ContractRegistryCenter_CanTransferFunction()
-	_, orgId, assetId := assets.AssetsFields()
-
-	// pack arguments for canTransferFunction
-	args, err := fvm.PackFunctionArgs(registryCenterABI, canTransferFunction, orgId, assetId)
-	if err != nil {
-		return errors.New("error packing function arguments for `CanTransfer`"), gas
-	}
-	// RegistryCenter.canTransfer costs 3473 gas, 2300 is not enough
-	ret, _, _, err := fvm.Call(caller, registryCenterAddr, args, 5000, common.Big0, nil, false)
-	// parse the result.
-	var outType bool
-	err = fvm.UnPackFunctionResult(registryCenterABI, &outType, canTransferFunction, ret)
-	if err != nil {
-		return errors.New("error unpacking function result for `CanTransfer`"), gas
-	}
-	if !outType {
-		return errors.New("can not transfer"), gas
-	}
-
-	return nil, gas
-}

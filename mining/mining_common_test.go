@@ -54,6 +54,8 @@ type ManagerTmp struct {
 	chain fvm.ChainContext
 	//  genesis transaction data cache
 	genesisDataCache map[common.ContractCode][]chaincfg.ContractInfo
+	// unrestricted assets cache
+	assetsUnrestrictedCache map[protos.Asset]struct{}
 }
 
 // Init manager by genesis data.
@@ -65,6 +67,7 @@ func (m *ManagerTmp) Init(chain fvm.ChainContext, dataBytes [] byte) error {
 	}
 	m.chain = chain
 	m.genesisDataCache = cMap
+	m.assetsUnrestrictedCache = make(map[protos.Asset]struct{})
 	return nil
 }
 
@@ -399,16 +402,10 @@ func (m *ManagerTmp) GetTemplate(
 		true, leftOvergas
 }
 
-
-type FeeItem struct {
-	Assets   *protos.Assets
-	Height   int32
-}
-
 func (m *ManagerTmp) GetFees(
 	block *asiutil.Block,
 	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig) (map[protos.Assets]int32, error, uint64) {
+	chainConfig *params.ChainConfig) (map[protos.Asset]int32, error) {
 
 	officialAddr := chaincfg.OfficialAddress
 	contract := m.GetActiveContractByHeight(block.Height(), common.ValidatorCommittee)
@@ -423,12 +420,12 @@ func (m *ManagerTmp) GetFees(
 	feelistFunc := common.ContractValidatorCommittee_GetAssetFeeListFunction()
 
 	runCode, err := fvm.PackFunctionArgs(abi, feelistFunc)
-	result, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
+	result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
 		common.SystemContractReadOnlyGas,
 		proxyAddr, runCode)
 	if err != nil {
 		log.Errorf("Get contract templates failed, error: %s", err)
-		return nil, err, leftOvergas
+		return nil, err
 	}
 	assets := make([]*big.Int,0)
 	height := make([]*big.Int,0)
@@ -439,109 +436,103 @@ func (m *ManagerTmp) GetFees(
 	err = fvm.UnPackFunctionResult(abi, &outData, feelistFunc, result)
 	if err != nil {
 		log.Errorf("Get fee list failed, error: %s", err)
-		return nil, err, leftOvergas
+		return nil, err
 	}
 	if len(assets) != len(height) {
-		errStr := "Get fee list failed, length of assets does not match length of height"
+		errStr := "Get fee list failed, length of asset does not match length of height"
 		log.Errorf(errStr)
-		return nil, errors.New(errStr), leftOvergas
+		return nil, errors.New(errStr)
 	}
 
-	fees := make(map[protos.Assets]int32)
+	fees := make(map[protos.Asset]int32)
 	for i := 0; i < len(assets); i++ {
 		pAssets := protos.AssetFromBytes(assets[i].Bytes())
 		fees[*pAssets] = int32(height[i].Int64())
 	}
 
-	return fees, nil, leftOvergas
+	return fees, nil
 }
 
+// IsLimit returns a number of int type by find in memory or calling system
+// contract of registry the number represents if an asset is restricted
 func (m *ManagerTmp) IsLimit(block *asiutil.Block,
-	stateDB vm.StateDB, assets *protos.Assets) int {
-	officialAddr := chaincfg.OfficialAddress
-	_, organizationId, assetIndex := assets.AssetsFields()
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
+	stateDB vm.StateDB, asset *protos.Asset) int {
+	if _, ok := m.assetsUnrestrictedCache[*asset]; ok {
+		return 0
 	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-	funcName := common.ContractRegistryCenter_IsRestrictedAssetFunction()
-	input, err := fvm.PackFunctionArgs(abi, funcName, organizationId, assetIndex)
-	if err != nil {
-		return -1
+	limit := m.isLimit(block, stateDB, asset)
+
+	if limit == 0 {
+		m.assetsUnrestrictedCache[*asset] = struct{}{}
 	}
 
+	return limit
+}
+
+// isLimit returns a number of int type by calling system contract of registry
+// the number represents if an asset is restricted
+func (m *ManagerTmp) isLimit(block *asiutil.Block,
+	stateDB vm.StateDB, asset *protos.Asset) int {
+	officialAddr := chaincfg.OfficialAddress
+	_, organizationId, assetIndex := asset.AssetFields()
+	registryCenterAddress := vm.ConvertSystemContractAddress(common.RegistryCenter)
+
+	input := common.PackIsRestrictedAssetInput(organizationId, assetIndex)
 	result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain,
 		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.SystemContractReadOnlyGas, proxyAddr, input)
+		common.ReadOnlyGas, registryCenterAddress, input)
 	if err != nil {
 		log.Error(err)
 		return -1
 	}
 
-	var outType = &[]interface{}{new(bool), new(bool)}
-	err = fvm.UnPackFunctionResult(abi, &outType, funcName, result)
+	existed, limit, err := common.UnPackIsRestrictedAssetResult(result)
 	if err != nil {
 		log.Error(err)
 		return -1
 	}
-	if !*((*outType)[0]).(*bool) {
+
+	if !existed {
 		return -1
 	}
-	if *((*outType)[1]).(*bool) {
+	if limit {
 		return 1
 	}
 	return 0
 }
 
 func (m *ManagerTmp) IsSupport(block *asiutil.Block,
-	stateDB vm.StateDB, gasLimit uint64, assets *protos.Assets, address []byte) (bool, uint64) {
+	stateDB vm.StateDB, gasLimit uint64, asset *protos.Asset, address []byte) (bool, uint64) {
 	if gasLimit < common.SupportCheckGas {
 		return false, 0
 	}
-	_, organizationId, assetIndex := assets.AssetsFields()
-	transferAddress := common.BytesToAddress(address)
 
+	// step1: prepare parameters for calling system contract to get organization address
+	_, organizationId, assetIndex := asset.AssetFields()
 	caller := chaincfg.OfficialAddress
+	registryCenterAddress := vm.ConvertSystemContractAddress(common.RegistryCenter)
 
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-	funcName := common.ContractRegistryCenter_GetOrganizationAddressByIdFunction()
-	input, err := fvm.PackFunctionArgs(abi, funcName, organizationId, assetIndex, transferAddress)
-	if err != nil {
-		return false, gasLimit
-	}
-
+	input := common.PackGetOrganizationAddressByIdInput(organizationId, assetIndex)
 	result, leftOverGas, err := fvm.CallReadOnlyFunction(caller, block, m.chain,
 		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.SupportCheckGas, proxyAddr, input)
+		common.SupportCheckGas, registryCenterAddress, input)
 	if err != nil {
 		log.Error(err)
-		return false, leftOverGas
-	}
-
-	var outType common.Address
-	err = fvm.UnPackFunctionResult(abi, &outType, funcName, result)
-	if err != nil {
-		log.Error(err)
-	}
-
-	if common.EmptyAddressValue == outType.String() {
 		return false, gasLimit - common.SupportCheckGas + leftOverGas
 	}
 
-	transferInput := common.PackCanTransferInput(transferAddress, assetIndex)
+	// check if return valid organization address
+	organizationAddress := common.BytesToAddress(result)
+	if common.EmptyAddressValue == organizationAddress.String() {
+		return false, gasLimit - common.SupportCheckGas + leftOverGas
+	}
+
+	// step2: call canTransfer method to check if the asset can be transfer
+	transferInput := common.PackCanTransferInput(address, assetIndex)
 
 	result2, leftOverGas2, _ := fvm.CallReadOnlyFunction(caller, block, m.chain,
 		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.ReadOnlyGas, outType, transferInput)
+		common.ReadOnlyGas, organizationAddress, transferInput)
 
 	support, err := common.UnPackBoolResult(result2)
 	if err != nil {
@@ -716,7 +707,7 @@ func (c *FakeBtcClient) GetBitcoinBlockChainInfo(result interface{}) error {
 type fakeIn struct {
 	account     *crypto.Account
 	amount      int64
-	assets      *protos.Assets
+	asset       *protos.Asset
 	index       uint32
 	coinbase    bool
 	blockHeight int32
@@ -726,14 +717,14 @@ type fakeIn struct {
 type fakeOut struct {
 	addr   *common.Address
 	amount int64
-	assets *protos.Assets
+	asset  *protos.Asset
 }
 
-func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *blockchain.UtxoViewpoint) *asiutil.Tx {
+func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *txo.UtxoViewpoint) *asiutil.Tx {
 	txMsg := protos.NewMsgTx(protos.TxVersion)
 
 	if global_view == nil {
-		global_view = blockchain.NewUtxoViewpoint()
+		global_view = txo.NewUtxoViewpoint()
 	}
 	for _, v := range vin {
 		inaddr := v.account.Address
@@ -742,13 +733,13 @@ func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *blockchain.UtxoVi
 		txin := protos.NewTxIn(&outpoint, nil)
 		txMsg.AddTxIn(txin)
 
-		entry := txo.NewUtxoEntry(v.amount, prePkScript, v.blockHeight, v.coinbase, v.assets, nil)
+		entry := txo.NewUtxoEntry(v.amount, prePkScript, v.blockHeight, v.coinbase, v.asset, nil)
 		global_view.AddEntry(outpoint, entry)
 	}
 
 	for _, v := range vout {
 		pkScript, _ := txscript.PayToAddrScript(v.addr)
-		txout := protos.NewTxOut(v.amount, pkScript, *v.assets)
+		txout := protos.NewTxOut(v.amount, pkScript, *v.asset)
 		txMsg.AddTxOut(txout)
 	}
 

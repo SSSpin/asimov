@@ -374,7 +374,7 @@ func TestBlockSerializeSize(t *testing.T) {
 		size int       // Expected serialized size
 	}{
 		// Block with no transactions.
-		{noTxBlock, 545},
+		{noTxBlock, 544},
 
 		// First block in the mainnet block chain.
 		{&blockOne, len(blockOneBytes)},
@@ -498,7 +498,6 @@ var blockOneBytes = []byte{
 	0x00, 0x00, 0x00, 0x00,//TxContract
 	0x00, 0x00, 0x00, 0x00, //LockTime
 	0x00, //MsgBlockSign
-    0x00, //BlockHeader
 }
 
 
@@ -556,8 +555,8 @@ var blockOne = MsgBlock{
 						0xee, // 65-byte signature
 						0xac, // OP_CHECKSIG
 					},
-					Assets: Assets{0,0},
-					Data:   []byte{},
+					Asset: Asset{0,0},
+					Data:  []byte{},
 				},
 			},
 			TxContract:TxContract{0},
@@ -565,5 +564,4 @@ var blockOne = MsgBlock{
 		},
 	},
 	PreBlockSigs:[]*MsgBlockSign{},
-	ReportHeaders:[]*BlockHeader{},
 }

@@ -38,10 +38,6 @@ const (
 	// used to calculate the median time used to validate block timestamps.
 	medianTimeBlocks = 11
 
-	// serializedHeightVersion is the block version which changed block
-	// coinbases to start with the serialized block height.
-	serializedHeightVersion = 2
-
 	// baseSubsidy is the starting subsidy amount for mined blocks.  This
 	// value is halved every SubsidyHalvingInterval blocks.
 	baseSubsidy = 200 * common.XingPerAsimov
@@ -75,15 +71,6 @@ func isNullOutpoint(outpoint *protos.OutPoint) bool {
 		return true
 	}
 	return false
-}
-
-// ShouldHaveSerializedBlockHeight determines if a block should have a
-// serialized block height embedded within the scriptSig of its
-// coinbase transaction. Judgement is based on the block version in the block
-// header. Blocks with version 2 and above satisfy this criteria. See BIP0034
-// for further information.
-func ShouldHaveSerializedBlockHeight(header *protos.BlockHeader) bool {
-	return header.Version >= serializedHeightVersion
 }
 
 // IsCoinBaseTx determines whether or not a transaction is a coinbase.  A coinbase
@@ -235,10 +222,10 @@ func CheckTransactionSanity(tx *asiutil.Tx) error {
 	// restrictions.  All amounts in a transaction are in a unit value known
 	// as a xing.  One bitcoin is a quantity of xing as defined by the
 	// XingPerAsimov common.
-	totalInCoin := make(map[protos.Assets]int64)
+	totalInCoin := make(map[protos.Asset]int64)
 	for _, txOut := range msgTx.TxOut {
 		// Only contract invoke accept value 0.
-		if txOut.Value == 0 && !txOut.Assets.IsIndivisible() && len(txOut.Data) > 0 {
+		if txOut.Value == 0 && !txOut.Asset.IsIndivisible() && len(txOut.Data) > 0 {
 			continue
 		}
 		xing := txOut.Value
@@ -250,29 +237,29 @@ func CheckTransactionSanity(tx *asiutil.Tx) error {
 		// Two's complement int64 overflow guarantees that any overflow
 		// is detected and reported.  This is impossible for Bitcoin, but
 		// perhaps possible if an alt increases the total money supply.
-		if !txOut.Assets.IsIndivisible() {
+		if !txOut.Asset.IsIndivisible() {
 			if xing > common.MaxXing {
 				str := fmt.Sprintf("CheckTransactionSanity: transaction output value of %v is "+
 					"higher than max allowed value of %v", xing,
 					common.MaxXing)
 				return ruleError(ErrBadTxOutValue, str)
 			}
-			if _, ok := totalInCoin[txOut.Assets]; ok {
-				totalInCoin[txOut.Assets] += xing
+			if _, ok := totalInCoin[txOut.Asset]; ok {
+				totalInCoin[txOut.Asset] += xing
 			} else {
-				totalInCoin[txOut.Assets] = xing
+				totalInCoin[txOut.Asset] = xing
 			}
 
-			if totalInCoin[txOut.Assets] <= 0 {
+			if totalInCoin[txOut.Asset] <= 0 {
 				str := fmt.Sprintf("CheckTransactionSanity: total value of all transaction "+
 					"outputs exceeds max allowed value of %v",
 					common.MaxXing)
 				return ruleError(ErrBadTxOutValue, str)
 			}
-			if totalInCoin[txOut.Assets] > common.MaxXing {
+			if totalInCoin[txOut.Asset] > common.MaxXing {
 				str := fmt.Sprintf("CheckTransactionSanity: total value of all transaction "+
 					"outputs is %v which is higher than max "+
-					"allowed value of %v", totalInCoin[txOut.Assets],
+					"allowed value of %v", totalInCoin[txOut.Asset],
 					common.MaxXing)
 				return ruleError(ErrBadTxOutValue, str)
 			}
@@ -347,7 +334,7 @@ func CountSigOps(tx *asiutil.Tx) int {
 // transactions which are of the pay-to-script-hash type.  This uses the
 // precise, signature operation counting mechanism from the script engine which
 // requires access to the input transaction scripts.
-func CountP2SHSigOps(tx *asiutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint) (int, error) {
+func CountP2SHSigOps(tx *asiutil.Tx, isCoinBaseTx bool, utxoView *txo.UtxoViewpoint) (int, error) {
 	// Coinbase transactions have no interesting inputs.
 	if isCoinBaseTx {
 		return 0, nil
@@ -567,10 +554,8 @@ func CheckBlockSanity(block *asiutil.Block, parent *blockNode) error {
 func ExtractCoinbaseHeight(coinbaseTx *asiutil.Tx) (int32, error) {
 	sigScript := coinbaseTx.MsgTx().TxIn[0].SignatureScript
 	if len(sigScript) < 1 {
-		str := "the coinbase signature script for blocks of " +
-			"version %d or greater must start with the " +
-			"length of the serialized block height"
-		str = fmt.Sprintf(str, serializedHeightVersion)
+		str := "the coinbase signature script for blocks " +
+			"must start with the length of the serialized block height"
 		return 0, ruleError(ErrMissingCoinbaseHeight, str)
 	}
 
@@ -588,10 +573,8 @@ func ExtractCoinbaseHeight(coinbaseTx *asiutil.Tx) (int32, error) {
 	// encode in the block height.
 	serializedLen := int(sigScript[0])
 	if len(sigScript[1:]) < serializedLen {
-		str := "the coinbase signature script for blocks of " +
-			"version %d or greater must start with the " +
-			"serialized block height"
-		str = fmt.Sprintf(str, serializedHeightVersion)
+		str := "the coinbase signature script for blocks " +
+			"must start with the serialized block height"
 		return 0, ruleError(ErrMissingCoinbaseHeight, str)
 	}
 
@@ -816,7 +799,7 @@ func (b *BlockChain) checkSignatures(block *asiutil.Block) error {
 	return nil
 }
 
-func (b *BlockChain) checkSignaturesWeight(node *blockNode, block *asiutil.Block, view *UtxoViewpoint) error {
+func (b *BlockChain) checkSignaturesWeight(node *blockNode, block *asiutil.Block, view *txo.UtxoViewpoint) error {
 	header := block.MsgBlock().Header
 
 	//get the validators of current block:
@@ -892,13 +875,12 @@ func (b *BlockChain) checkSignaturesWeight(node *blockNode, block *asiutil.Block
 		chkSigErr := b.db.View(func(dbTx database.Tx) error {
 			for _, sign := range block.Signs() {
 				if view != nil {
-					if action, exist := view.signs[*sign.MsgSign]; exist {
-						if action == asiutil.ViewRm {
-							continue
-						}
-						if action == asiutil.ViewAdd {
-							return ruleError(ErrSignDuplicate, "sign duplicated")
-						}
+					action := view.TryGetSignAction(sign.MsgSign);
+					if action == txo.ViewRm {
+						continue
+					}
+					if action == txo.ViewAdd {
+						return ruleError(ErrSignDuplicate, "sign duplicated")
 					}
 				}
 				has := dbHasSignature(dbTx, sign)
@@ -913,7 +895,7 @@ func (b *BlockChain) checkSignaturesWeight(node *blockNode, block *asiutil.Block
 		}
 		if view != nil {
 			for _, sign := range block.Signs() {
-				view.signs[*sign.MsgSign] = asiutil.ViewAdd
+				view.AddViewSign(sign.MsgSign)
 			}
 		}
 	}
@@ -932,8 +914,8 @@ func (b *BlockChain) checkSignaturesWeight(node *blockNode, block *asiutil.Block
 //
 // NOTE: The transaction MUST have already been sanity checked with the
 // CheckTransactionSanity function prior to calling this function.
-func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpoint,
-	b *BlockChain) (int64, *map[protos.Assets]int64, error) {
+func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *txo.UtxoViewpoint,
+	b *BlockChain) (int64, *map[protos.Asset]int64, error) {
 
 	// Coinbase transactions have no inputs.
 	if IsCoinBase(tx) {
@@ -951,11 +933,10 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 	// no more than one asset in one tx except flowAsset .
 	//var totalCoinXingIn int64
 	//var totalFlowAssetIn int64
-	totalInCoin := make(map[protos.Assets]int64)
-	//txAssets := asiutil.FlowCoinAsset
+	totalInCoin := make(map[protos.Asset]int64)
 
 	//undivisible.
-	totalInAsset := make(map[protos.Assets]map[int64]struct{})
+	totalInAsset := make(map[protos.Asset]map[int64]struct{})
 
 	for txInIndex, txIn := range tx.MsgTx().TxIn {
 		// Ensure the referenced input transaction is available.
@@ -1006,22 +987,22 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 			return 0, nil, ruleError(ErrBadTxOutValue, str)
 		}
 
-		if !utxo.Assets().IsIndivisible() {
-			if _, ok := totalInCoin[*utxo.Assets()]; ok {
-				totalInCoin[*utxo.Assets()] += utxo.Amount()
+		if !utxo.Asset().IsIndivisible() {
+			if _, ok := totalInCoin[*utxo.Asset()]; ok {
+				totalInCoin[*utxo.Asset()] += utxo.Amount()
 			} else {
-				totalInCoin[*utxo.Assets()] = utxo.Amount()
+				totalInCoin[*utxo.Asset()] = utxo.Amount()
 			}
 
 		} else {
-			if _, ok := totalInAsset[*utxo.Assets()]; !ok {
-				totalInAsset[*utxo.Assets()] = make(map[int64]struct{})
+			if _, ok := totalInAsset[*utxo.Asset()]; !ok {
+				totalInAsset[*utxo.Asset()] = make(map[int64]struct{})
 			}
 
-			assetInfo := totalInAsset[*utxo.Assets()]
+			assetInfo := totalInAsset[*utxo.Asset()]
 			if _, ok := assetInfo[utxo.Amount()]; ok {
 				str := fmt.Sprintf("CheckTransactionInputs: duplicated input asset "+
-					"no %v asset type of %v", utxo.Amount(), utxo.Assets())
+					"no %v asset type of %v", utxo.Amount(), utxo.Asset())
 				return 0, nil, ruleError(ErrDuplicateTxInputs, str)
 
 			} else {
@@ -1034,8 +1015,8 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 	// Calculate the total output amount for this transaction.  It is safe
 	// to ignore overflow and out of range errors here because those error
 	// conditions would have already been caught by checkTransactionSanity.
-	totalOutCoin := make(map[protos.Assets]int64)
-	totalOutAsset := make(map[protos.Assets]map[int64]struct{})
+	totalOutCoin := make(map[protos.Asset]int64)
+	totalOutAsset := make(map[protos.Asset]map[int64]struct{})
 
 	for outIdx, txOut := range tx.MsgTx().TxOut {
 
@@ -1044,22 +1025,22 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 			return 0, nil, ruleError(ErrInvalidOutput, str)
 		}
 
-		if !txOut.Assets.IsIndivisible() {
-			if _, ok := totalOutCoin[txOut.Assets]; ok {
-				totalOutCoin[txOut.Assets] += txOut.Value
+		if !txOut.Asset.IsIndivisible() {
+			if _, ok := totalOutCoin[txOut.Asset]; ok {
+				totalOutCoin[txOut.Asset] += txOut.Value
 			} else {
-				totalOutCoin[txOut.Assets] = txOut.Value
+				totalOutCoin[txOut.Asset] = txOut.Value
 			}
 
 		} else {
-			if _, ok := totalOutAsset[txOut.Assets]; !ok {
-				totalOutAsset[txOut.Assets] = make(map[int64]struct{})
+			if _, ok := totalOutAsset[txOut.Asset]; !ok {
+				totalOutAsset[txOut.Asset] = make(map[int64]struct{})
 			}
 
-			assetInfo := totalOutAsset[txOut.Assets]
+			assetInfo := totalOutAsset[txOut.Asset]
 			if _, ok := assetInfo[txOut.Value]; ok {
 				str := fmt.Sprintf("CheckTransactionInputs: duplicated out asset no %v asset type of %v",
-					txOut.Value, txOut.Assets)
+					txOut.Value, txOut.Asset)
 				return 0, nil, ruleError(ErrDuplicateTxInputs, str)
 
 			} else {
@@ -1078,8 +1059,8 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 	for k, outAsset := range totalOutAsset {
 		inAsset, ok := totalInAsset[k]
 		if !ok {
-			str := fmt.Sprintf("CheckTransactionInputs: miss assets inputs for "+
-				"transaction %v,asset type %v", txHash, k)
+			str := fmt.Sprintf("CheckTransactionInputs: miss asset inputs for "+
+				"transaction %v, asset %v", txHash, k)
 			return 0, nil, ruleError(ErrNoTxInputs, str)
 		}
 
@@ -1092,25 +1073,25 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 
 		for assetNum := range outAsset {
 			if _, has := inAsset[assetNum]; !has {
-				str := fmt.Sprintf("CheckTransactionInputs: miss assets inputs for "+
-					"transaction %v ,asset type %v, asset num %v", txHash, k, assetNum)
+				str := fmt.Sprintf("CheckTransactionInputs: miss asset inputs for "+
+					"transaction %v ,asset %v, asset num %v", txHash, k, assetNum)
 				return 0, nil, ruleError(ErrNoTxInputs, str)
 			}
 		}
 	}
 
-	fees := make(map[protos.Assets]int64)
+	fees := make(map[protos.Asset]int64)
 	for k, out := range totalOutCoin {
 		in, ok := totalInCoin[k]
 		if !ok {
-			str := fmt.Sprintf("CheckTransactionInputs: miss assets inputs for "+
-				"transaction %v ,asset type %v", txHash, k)
+			str := fmt.Sprintf("CheckTransactionInputs: miss asset inputs for "+
+				"transaction %v ,asset %v", txHash, k)
 			return 0, nil, ruleError(ErrAssetsNotEqual, str)
 		}
 
 		if in < out {
-			str := fmt.Sprintf("CheckTransactionInputs: total value of assets inputs for "+
-				"transaction %v, asset type %v, value %v is less than output"+
+			str := fmt.Sprintf("CheckTransactionInputs: total value of asset inputs for "+
+				"transaction %v, asset %v, value %v is less than output"+
 				"spent of %v", txHash, k, in, out)
 			return 0, nil, ruleError(ErrSpendTooHigh, str)
 		}
@@ -1136,14 +1117,11 @@ func CheckTransactionInputs(tx *asiutil.Tx, txHeight int32, utxoView *UtxoViewpo
 	}
 
 	return totalFee, &fees, nil
-	// NOTE: it is possible to have more than one VVSCoinType inputs
-	// which will be spent to allow other asset tx.
-	// but it only contains one output which assetId is VVSCoinType(0)
-	// so here we just calculate total output txFee
-	//return totalFlowAssetIn - totalFlowAssetOut, nil
+	// NOTE: it is possible to have more than one Asset input
+	// which will be spent to allow other asset as fee.
 }
 
-func CheckVTransactionInputs(tx *asiutil.Tx, utxoView *UtxoViewpoint) error {
+func CheckVTransactionInputs(tx *asiutil.Tx, utxoView *txo.UtxoViewpoint) error {
 	for txInIndex, txIn := range tx.MsgTx().TxIn {
 		isVtxMint := asiutil.IsMintOrCreateInput(txIn)
 		if isVtxMint {
@@ -1165,7 +1143,7 @@ func CheckVTransactionInputs(tx *asiutil.Tx, utxoView *UtxoViewpoint) error {
 				"value of %v", common.Amount(originTxXing))
 			return ruleError(ErrBadTxInput, str)
 		}
-		if !utxo.Assets().IsIndivisible() && originTxXing > common.MaxXing {
+		if !utxo.Asset().IsIndivisible() && originTxXing > common.MaxXing {
 			str := fmt.Sprintf("CheckVTransactionInputs: transaction preoutput value of %v is "+
 				"higher than max allowed value of %v",
 				common.Amount(originTxXing),
@@ -1181,7 +1159,7 @@ func CheckVTransactionInputs(tx *asiutil.Tx, utxoView *UtxoViewpoint) error {
 			return ruleError(ErrBadTxOutValue, str)
 		}
 
-		if !txOut.Assets.IsIndivisible() && txOut.Value > common.MaxXing {
+		if !txOut.Asset.IsIndivisible() && txOut.Value > common.MaxXing {
 			str := fmt.Sprintf("CheckVTransactionInputs: transaction output value of %v is "+
 				"higher than max allowed value of %v",
 				txOut.Value,
@@ -1194,7 +1172,7 @@ func CheckVTransactionInputs(tx *asiutil.Tx, utxoView *UtxoViewpoint) error {
 }
 
 // we should get the value from the market maker contract.
-func GetUsd(assets *protos.Assets, value int64) int64 {
+func GetUsd(asset *protos.Asset, value int64) int64 {
 	return 1e8 / 1e8 * value
 }
 
@@ -1291,11 +1269,26 @@ func (b *BlockChain) GetValidatorsByNode(round uint32, preroundLastNode *blockNo
 // with that node.
 //
 // This function MUST be called with the chain state lock held (for writes).
-func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, view *UtxoViewpoint,
-	stxos *[]SpentTxOut, msgvblock *protos.MsgVBlock, statedb *state.StateDB,
-	feepool map[protos.Assets]int32) (
-	types.Receipts, []*types.Log, map[protos.Assets]*txo.LockItem, error) {
+func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, view *txo.UtxoViewpoint,
+	stxos *[]txo.SpentTxOut, msgvblock *protos.MsgVBlock) (
+	types.Receipts, []*types.Log, error) {
 
+	// Check Sig & Weight
+	err := b.checkSignaturesWeight(node, block, view)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	//contract related statedb info.
+	statedb, err := state.New(node.parent.stateRoot, b.stateCache)
+	if err != nil {
+		return nil, nil, err
+	}
+	feepool, err := b.GetAcceptFees(block,
+		statedb, chaincfg.ActiveNetParams.FvmParam, block.Height())
+	if err != nil {
+		return nil, nil, err
+	}
 	// If the side chain blocks end up in the database, a call to
 	// CheckBlockSanity should be done here in case a previous version
 	// allowed a block that is no longer valid.  However, since the
@@ -1306,7 +1299,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	// an error now.
 	if node.hash.IsEqual(b.chainParams.GenesisHash) {
 		str := "invalid hash when checking block connection: the block to be checked can not be genesis block"
-		return nil, nil, nil, ruleError(ErrInvalidBlockHash, str)
+		return nil, nil, ruleError(ErrInvalidBlockHash, str)
 	}
 
 	// Ensure the view is for the node being checked.
@@ -1315,7 +1308,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 		errStr := fmt.Sprintf("inconsistent view when "+
 			"checking block connection: best hash is %v instead "+
 			"of expected %v", view.BestHash(), parentHash)
-		return nil, nil, nil, ruleError(ErrHashMismatch, errStr)
+		return nil, nil, ruleError(ErrHashMismatch, errStr)
 	}
 
 	// Load all of the utxos referenced by the inputs for all transactions
@@ -1323,9 +1316,9 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	//
 	// These utxo entries are needed for verification of things such as
 	// transaction inputs, counting pay-to-script-hashes, and scripts.
-	err := view.fetchInputUtxos(b.db, block)
+	err = fetchInputUtxos(view, b.db, block)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// The number of signature operations must be less than the maximum
@@ -1346,7 +1339,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 		// full coinbase check again.
 		sigOpCost, err := GetSigOpCost(tx, i == coinbaseIdx, view)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 
 		// Check for overflow or going over the limits.  We have to do
@@ -1357,7 +1350,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 			str := fmt.Sprintf("block contains too many "+
 				"signature operations - got %v, max %v",
 				totalSigOpCost, MaxBlockSigOpsCost)
-			return nil, nil, nil, ruleError(ErrTooManySigOps, str)
+			return nil, nil, ruleError(ErrTooManySigOps, str)
 		}
 	}
 
@@ -1369,31 +1362,31 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	// against all the inputs when the signature operations are out of
 	// bounds.
 	var totalGasUsed uint64
-	allFees := make(map[protos.Assets]int64)
+	allFees := make(map[protos.Asset]int64)
 	var (
 		receipts          types.Receipts
 		allLogs           []*types.Log
-		totalFeeLockItems map[protos.Assets]*txo.LockItem
+		totalFeeLockItems map[protos.Asset]*txo.LockItem
 	)
 	for i, tx := range transactions {
 		fee, feeList, err := CheckTransactionInputs(tx, node.height, view, b)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 
 		// Sum the total fees and ensure we don't overflow the
 		// accumulator.
 		if feeList != nil {
-			for assets, _ := range *feeList {
-				if _, ok := feepool[assets]; !ok {
+			for asset, _ := range *feeList {
+				if _, ok := feepool[asset]; !ok {
 					errstr := fmt.Sprintf("Skipping tx %s because its "+
-						"fee %v is unsupported", tx.Hash(), assets)
-					return nil, nil, nil, ruleError(ErrForbiddenAssets, errstr)
+						"fee %v is unsupported", tx.Hash(), asset)
+					return nil, nil, ruleError(ErrForbiddenAsset, errstr)
 				}
 			}
 			err = MergeFees(&allFees, feeList)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -1408,7 +1401,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 			allLogs = append(allLogs, receipt.Logs...)
 		}
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		totalGasUsed += gasUsed
 		if vtx != nil && msgvblock != nil {
@@ -1430,11 +1423,11 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	if block.MsgBlock().Header.GasUsed != totalGasUsed {
 		errStr := fmt.Sprintf("total gas used mismatch, header %d vs calc %d.",
 			block.MsgBlock().Header.GasUsed, totalGasUsed)
-		return nil, nil, nil, ruleError(ErrGasMismatch, errStr)
+		return nil, nil, ruleError(ErrGasMismatch, errStr)
 	}
 
 	if err := b.checkCoinbaseTx(node.parent, block, allFees); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// Don't run scripts if this node is before the latest known good
@@ -1478,14 +1471,14 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 		sequenceLock, err := b.calcSequenceLock(node, tx, view,
 			false)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		if !SequenceLockActive(sequenceLock, node.height,
 			medianTime) {
 			str := fmt.Sprintf("block contains " +
 				"transaction whose input sequence " +
 				"locks are not met")
-			return nil, nil, nil, ruleError(ErrUnfinalizedTx, str)
+			return nil, nil, ruleError(ErrUnfinalizedTx, str)
 		}
 	}
 
@@ -1496,7 +1489,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	if runScripts {
 		err := checkBlockScripts(block, view, scriptFlags)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -1504,7 +1497,21 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *asiutil.Block, vi
 	// transactions have been connected.
 	view.SetBestHash(&node.hash)
 
-	return receipts, allLogs, totalFeeLockItems, nil
+	//save dbstate.
+	stateRoot, err := statedb.Commit(true)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := statedb.Database().TrieDB().Commit(stateRoot, false); err != nil {
+		return nil, nil, err
+	}
+	if !bytes.Equal(node.stateRoot[:], stateRoot[:]) {
+		return nil, nil, ruleError(ErrStateRootNotMatch, "state root of the block is not matched.")
+	}
+
+	updateFeeLockItems(block, view, totalFeeLockItems)
+
+	return receipts, allLogs, nil
 }
 
 func (b *BlockChain) createCoinbaseContractOut(preround uint32, preroundLastNode *blockNode) (*protos.TxOut, error) {
@@ -1544,7 +1551,7 @@ func (b *BlockChain) createCoinbaseContractOut(preround uint32, preroundLastNode
 		return nil, err
 	}
 	pkscript, err := txscript.PayToAddrScript(&proxy)
-	return protos.NewContractTxOut(0, pkscript, asiutil.FlowCoinAsset, input), nil
+	return protos.NewContractTxOut(0, pkscript, asiutil.AsimovAsset, input), nil
 }
 
 // The total output values of the coinbase transaction must not exceed
@@ -1552,16 +1559,16 @@ func (b *BlockChain) createCoinbaseContractOut(preround uint32, preroundLastNode
 // mining the block.  It is safe to ignore overflow and out of range
 // errors here because those error conditions would have already been
 // caught by checkTransactionSanity.
-func (b *BlockChain) checkCoinbaseTx(prenode *blockNode, block *asiutil.Block, allFees map[protos.Assets]int64) error {
+func (b *BlockChain) checkCoinbaseTx(prenode *blockNode, block *asiutil.Block, allFees map[protos.Asset]int64) error {
 	coinbaseIdx := len(block.Transactions()) - 1
 	coinbaseTx := block.Transactions()[coinbaseIdx].MsgTx()
-	mineFeelist := make(map[protos.Assets]int64)
+	mineFeelist := make(map[protos.Asset]int64)
 	for _, txOut := range coinbaseTx.TxOut {
-		mineFeelist[txOut.Assets] += txOut.Value
+		mineFeelist[txOut.Asset] += txOut.Value
 	}
 
 	reward := CalcBlockSubsidy(block.Height(), b.chainParams)
-	allFees[asiutil.FlowCoinAsset] += reward
+	allFees[asiutil.AsimovAsset] += reward
 
 	if len(allFees) != len(mineFeelist) {
 		str := fmt.Sprintf("checkCoinbaseTx: the asset numbers of allFees: %v "+
@@ -1596,7 +1603,7 @@ func (b *BlockChain) checkCoinbaseTx(prenode *blockNode, block *asiutil.Block, a
 		}
 		if bytes.Compare(expectedOut.Data, actualOut.Data) != 0 ||
 			bytes.Compare(expectedOut.PkScript, actualOut.PkScript) != 0 ||
-			expectedOut.Value != actualOut.Value || !expectedOut.Assets.Equal(&actualOut.Assets) {
+			expectedOut.Value != actualOut.Value || !expectedOut.Asset.Equal(&actualOut.Asset) {
 			errStr := fmt.Sprintf("coinbase tx contains unexpected contract txout %s, expect: %v actual: %v",
 				block.MsgBlock().Header.CoinBase.String(), expectedOut, actualOut)
 			return ruleError(ErrBadCoinbaseData, errStr)
@@ -1616,13 +1623,13 @@ func (b *BlockChain) checkCoinbaseTx(prenode *blockNode, block *asiutil.Block, a
 }
 
 // validate the reward of the core team in the coinbase tx.
-func checkCoreTeamReward(coinbaseTx *protos.MsgTx, mineFeelist map[protos.Assets]int64) error {
+func checkCoreTeamReward(coinbaseTx *protos.MsgTx, mineFeelist map[protos.Asset]int64) error {
 	fundationAddr := common.HexToAddress(string(common.GenesisOrganization))
 	pkScript, _ := txscript.PayToAddrScript(&fundationAddr)
-	coreTeamReward := make(map[protos.Assets]int64)
+	coreTeamReward := make(map[protos.Asset]int64)
 	for _, txout := range coinbaseTx.TxOut {
 		if bytes.Equal(pkScript, txout.PkScript) {
-			coreTeamReward[txout.Assets] += txout.Value
+			coreTeamReward[txout.Asset] += txout.Value
 		}
 	}
 
@@ -1641,7 +1648,7 @@ func checkCoreTeamReward(coinbaseTx *protos.MsgTx, mineFeelist map[protos.Assets
 
 // GetSigOpCost returns the unified sig op cost for the passed transaction
 // respecting current active soft-forks which modified sig op cost counting.
-func GetSigOpCost(tx *asiutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint) (int, error) {
+func GetSigOpCost(tx *asiutil.Tx, isCoinBaseTx bool, utxoView *txo.UtxoViewpoint) (int, error) {
 	numSigOps := CountSigOps(tx)
 	numP2SHSigOps, err := CountP2SHSigOps(tx, isCoinBaseTx, utxoView)
 	if err != nil {
@@ -1663,22 +1670,22 @@ func pkScriptToAddr(pkScript []byte) ([]byte, error) {
 }
 
 // suppose both parameters are valid (Divisible)
-func MergeFees(totalp *map[protos.Assets]int64, feep *map[protos.Assets]int64) error {
+func MergeFees(totalp *map[protos.Asset]int64, feep *map[protos.Asset]int64) error {
 	if totalp == nil || feep == nil {
 		return nil
 	}
 
 	total := *totalp
-	for assets, v := range *feep {
+	for asset, v := range *feep {
 
-		if _, has := total[assets]; has {
-			lastTotalFee := total[assets]
-			total[assets] += v
-			if total[assets] < lastTotalFee {
+		if _, has := total[asset]; has {
+			lastTotalFee := total[asset]
+			total[asset] += v
+			if total[asset] < lastTotalFee {
 				return ruleError(ErrBadFees, "total fee for block overflows accumulator")
 			}
 		} else {
-			total[assets] = v
+			total[asset] = v
 		}
 	}
 	return nil
@@ -1689,29 +1696,25 @@ func (b *BlockChain) GetAcceptFees(
 	block *asiutil.Block,
 	stateDB vm.StateDB,
 	chainConfig *params.ChainConfig,
-	height int32) (map[protos.Assets]int32, error, uint64) {
-	fees, err, leftOverGas := b.contractManager.GetFees(block, stateDB, chainConfig)
+	height int32) (map[protos.Asset]int32, error) {
+	fees, err := b.contractManager.GetFees(block, stateDB, chainConfig)
 	if err != nil {
-		return nil, err, leftOverGas
+		return nil, err
 	}
-	return FilterAcceptFee(fees, height), nil, leftOverGas
-}
 
-//TODO
-func FilterAcceptFee(fees map[protos.Assets]int32, height int32) map[protos.Assets]int32 {
-	res := make(map[protos.Assets]int32)
-	for assets, value := range fees {
+	res := make(map[protos.Asset]int32)
+	for asset, value := range fees {
 		if value <= height {
-			res[assets] = value
+			res[asset] = value
 		}
 	}
-	res[asiutil.FlowCoinAsset] = 0
-	return res
+	res[asiutil.AsimovAsset] = 0
+	return res, nil
 }
 
 //TODO
 func (b *BlockChain) GetByteCode(
-	txs map[common.Hash]asiutil.TxMark,
+	txs map[common.Hash]txo.TxMark,
 	block *asiutil.Block,
 	gas uint64,
 	stateDB vm.StateDB,

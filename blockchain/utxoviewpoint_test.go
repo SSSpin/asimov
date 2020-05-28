@@ -32,7 +32,7 @@ func TestFetchUtxoViewByAddress(t *testing.T) {
 		{0x66,0xe3,0x05,0x4b,0x41,0x10,0x51,0xda,0x54,0x92,0xae,0xc7,0xa8,0x23,},
 	}
 
-	var testAsset = []protos.Assets{
+	var testAsset = []protos.Asset{
 		{0,0},
 		{1,1},
 	}
@@ -50,9 +50,9 @@ func TestFetchUtxoViewByAddress(t *testing.T) {
 		if err != nil {
 			t.Errorf("create block error %v", err)
 		}
-		view := NewUtxoViewpoint()
+		view := txo.NewUtxoViewpoint()
 		coinBase := asiutil.NewTx(block.MsgBlock().Transactions[0])
-		_ = view.AddTxOuts(coinBase, block.Height())
+		_ = view.AddTxOuts(coinBase.Hash(), coinBase.MsgTx(), false, block.Height())
 		if i == 0 {
 			coinbasePkscript = coinBase.MsgTx().TxOut[1].PkScript
 		} else {
@@ -69,7 +69,7 @@ func TestFetchUtxoViewByAddress(t *testing.T) {
 			return nil
 		})
 
-		for outpoint, entry := range view.entries {
+		for outpoint, entry := range view.Entries() {
 			// No need to update the database if the entry was not modified.
 			if entry == nil || !entry.IsModified() {
 				continue
@@ -114,25 +114,25 @@ func TestFetchUtxoViewByAddress(t *testing.T) {
 	for i, test := range tests {
 		t.Logf("==========test case %d==========", i)
 
-		utxoViewPoint := NewUtxoViewpoint()
+		utxoViewPoint := txo.NewUtxoViewpoint()
 		_, err := chain.FetchUtxoViewByAddress(utxoViewPoint, test.addr.ScriptAddress())
 		if err != nil {
 			t.Errorf("tests #%d error %v", i, err)
 		} else {
 			wantLength := len(test.result)
-			gotLength := len(utxoViewPoint.entries)
+			gotLength := len(utxoViewPoint.Entries())
 			if wantLength != gotLength {
 				t.Errorf("tests #%d error: the number of result is not correct", i)
 			}
 
 			for tmp:=0; tmp<len(test.result);tmp++ {
 				wantMap := test.result[tmp]
-				gotMap := utxoViewPoint.entries
+				gotMap := utxoViewPoint.Entries()
 				if _, ok := gotMap[wantMap.Key]; ok {
-					if wantMap.Value.Assets().Id != gotMap[wantMap.Key].Assets().Id ||
-						wantMap.Value.Assets().Property != gotMap[wantMap.Key].Assets().Property{
-						t.Errorf("tests #%d error: the assets of result utxoViewPoint is not correct: " +
-							"want: %v, got: %v", i, wantMap.Value.Assets(), gotMap[wantMap.Key].Assets())
+					if wantMap.Value.Asset().Id != gotMap[wantMap.Key].Asset().Id ||
+						wantMap.Value.Asset().Property != gotMap[wantMap.Key].Asset().Property{
+						t.Errorf("tests #%d error: the asset of result utxoViewPoint is not correct: " +
+							"want: %v, got: %v", i, wantMap.Value.Asset(), gotMap[wantMap.Key].Asset())
 					}
 					if !bytes.Equal(wantMap.Value.PkScript(), gotMap[wantMap.Key].PkScript()) {
 						t.Errorf("tests #%d error: the pkScript of result utxoViewPoint is not correct: " +
@@ -166,10 +166,10 @@ func TestConstructLockItems(t *testing.T) {
 	voteId2 := txo.VoteId{1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,0,0,0,2}
 	voteId3 := txo.VoteId{1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,0,0,0,3}
 	voteId4 := txo.VoteId{1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,0,0,0,4}
-	assets1 := protos.Assets{0,1}
-	assets2 := protos.Assets{0,2}
-	assets3 := protos.Assets{0,3}
-	indivisibleAssets := protos.Assets{1,1}
+	asset1 := protos.Asset{0,1}
+	asset2 := protos.Asset{0,2}
+	asset3 := protos.Asset{0,3}
+	indivisibleAsset := protos.Asset{1,1}
 
 	//test coinbase tx:
 	msgCoinbase := protos.MsgTx{
@@ -179,15 +179,15 @@ func TestConstructLockItems(t *testing.T) {
 			}, nil),
 		},
 		TxOut: []*protos.TxOut {
-			protos.NewTxOut(10000000000, []byte{txscript.OP_1}, asiutil.FlowCoinAsset),
+			protos.NewTxOut(10000000000, []byte{txscript.OP_1}, asiutil.AsimovAsset),
 		},
 	}
 	txCoinbase := asiutil.NewTx(&msgCoinbase)
-	viewCoinbase := NewUtxoViewpoint()
-	lockItemCoinbaseWant := []*txo.LockItem {
+	viewCoinbase := txo.NewUtxoViewpoint()
+	lockItemCoinbaseWant := []*txo.LockItem{
 		nil,
 	}
-	lockItemsCoinbase, feeLockItemsCoinbase := viewCoinbase.ConstructLockItems(txCoinbase, 10)
+	lockItemsCoinbase, feeLockItemsCoinbase := viewCoinbase.ConstructLockItems(txCoinbase.MsgTx(), 10)
 	if len(feeLockItemsCoinbase) != 0 {
 		t.Errorf("the length of feeLockItemsCoinbase expect to be 0")
 		return
@@ -209,14 +209,14 @@ func TestConstructLockItems(t *testing.T) {
 		},
 	}
 	txNoOutPut := asiutil.NewTx(&msgNoOutPut)
-	viewNoOutPut := NewUtxoViewpoint()
-	lockItemsNoOutPut, feeLockItemsNoOutPut := viewNoOutPut.ConstructLockItems(txNoOutPut, 10)
+	viewNoOutPut := txo.NewUtxoViewpoint()
+	lockItemsNoOutPut, feeLockItemsNoOutPut := viewNoOutPut.ConstructLockItems(txNoOutPut.MsgTx(), 10)
 	if !(lockItemsNoOutPut == nil && feeLockItemsNoOutPut == nil) {
 		t.Errorf("lockItems1 and feeLockItems1 both expected nil")
 		return
 	}
 
-	//test VoteTy tx with indivisible assets
+	//test VoteTy tx with indivisible asset
 	indivisibleAssetMsg := protos.MsgTx{
 		TxIn: []*protos.TxIn {
 			protos.NewTxIn(&protos.OutPoint{
@@ -232,33 +232,33 @@ func TestConstructLockItems(t *testing.T) {
 		},
 		TxOut: []*protos.TxOut {
 			protos.NewContractTxOut(200000000, []byte{txscript.OP_VOTE, txscript.OP_DATA_21,
-				0x63, 0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,}, indivisibleAssets, []byte{
+				0x63, 0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,}, indivisibleAsset, []byte{
 				0,1,2,3,4,5,
 				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,
 				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,200,
 			}),
-			protos.NewTxOut(100000000, []byte{txscript.OP_3}, asiutil.FlowCoinAsset),
+			protos.NewTxOut(100000000, []byte{txscript.OP_3}, asiutil.AsimovAsset),
 		},
 	}
 	indivisibleTx := asiutil.NewTx(&indivisibleAssetMsg)
-	indivisibleView := NewUtxoViewpoint()
-	indivisibleView.entries[indivisibleAssetMsg.TxIn[0].PreviousOutPoint] = txo.NewUtxoEntry(
+	indivisibleView := txo.NewUtxoViewpoint()
+	indivisibleView.AddEntry(indivisibleAssetMsg.TxIn[0].PreviousOutPoint, txo.NewUtxoEntry(
 		200000000,
 		nil,
 		0,
 		false,
-		&indivisibleAssets,
-		nil)
-	indivisibleView.entries[indivisibleAssetMsg.TxIn[1].PreviousOutPoint] = txo.NewUtxoEntry(
+		&indivisibleAsset,
+		nil))
+	indivisibleView.AddEntry(indivisibleAssetMsg.TxIn[1].PreviousOutPoint, txo.NewUtxoEntry(
 		100000000,
 		nil,
 		0,
 		false,
-		&asiutil.FlowCoinAsset,
-		nil)
+		&asiutil.AsimovAsset,
+		nil))
 
 
-	indivisibleAssetLockItems, indivisibleAssetFeeLockItems := indivisibleView.ConstructLockItems(indivisibleTx, 10)
+	indivisibleAssetLockItems, indivisibleAssetFeeLockItems := indivisibleView.ConstructLockItems(indivisibleTx.MsgTx(), 10)
 	if len(indivisibleAssetFeeLockItems) != 0 {
 		t.Errorf("the length of feeLockItemsCoinbase expect to be 0")
 		return
@@ -310,39 +310,39 @@ func TestConstructLockItems(t *testing.T) {
 		},
 		TxOut: []*protos.TxOut {
 			protos.NewContractTxOut(200000000, []byte{txscript.OP_VOTE, txscript.OP_DATA_21,
-				0x63, 0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,}, asiutil.FlowCoinAsset, []byte{
+				0x63, 0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,}, asiutil.AsimovAsset, []byte{
 				0,1,2,3,4,5,
 				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,
 				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,200,
 			}),
-			protos.NewTxOut(1600000000, []byte{txscript.OP_1}, assets1),
-			protos.NewTxOut(100000000, []byte{txscript.OP_2}, assets1),
-			protos.NewTxOut(2100000000, []byte{txscript.OP_3}, assets2),
-			protos.NewTxOut(4000000000, []byte{txscript.OP_3}, assets3),
-			protos.NewTxOut(0, []byte{txscript.OP_3}, assets3),
-			protos.NewTxOut(100000000, []byte{txscript.OP_3}, asiutil.FlowCoinAsset),
+			protos.NewTxOut(1600000000, []byte{txscript.OP_1}, asset1),
+			protos.NewTxOut(100000000, []byte{txscript.OP_2}, asset1),
+			protos.NewTxOut(2100000000, []byte{txscript.OP_3}, asset2),
+			protos.NewTxOut(4000000000, []byte{txscript.OP_3}, asset3),
+			protos.NewTxOut(0, []byte{txscript.OP_3}, asset3),
+			protos.NewTxOut(100000000, []byte{txscript.OP_3}, asiutil.AsimovAsset),
 		},
 	}
 	tx := asiutil.NewTx(&msg)
 	firstOut := tx.MsgTx().TxOut[0]
 	_, addrs, _, _ := txscript.ExtractPkScriptAddrs(firstOut.PkScript)
-	id := pickVoteArgument(firstOut.Data)
+	id := txo.PickVoteArgument(firstOut.Data)
 	voteIdFirst := txo.NewVoteId(addrs[0].StandardAddress(), id)
 
-	view := NewUtxoViewpoint()
-	view.entries[msg.TxIn[0].PreviousOutPoint] = txo.NewUtxoEntry(
+	view := txo.NewUtxoViewpoint()
+	view.AddEntry(msg.TxIn[0].PreviousOutPoint, txo.NewUtxoEntry(
 		300000000,
 		nil,
 		0,
 		false,
-		&asiutil.FlowCoinAsset,
-		nil)
-	view.entries[msg.TxIn[1].PreviousOutPoint] = txo.NewUtxoEntry(
+		&asiutil.AsimovAsset,
+		nil))
+	view.AddEntry(msg.TxIn[1].PreviousOutPoint, txo.NewUtxoEntry(
 		1500000000,
 		nil,
 		0,
 		false,
-		&assets1,
+		&asset1,
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId1:&txo.LockEntry{
@@ -352,13 +352,13 @@ func TestConstructLockItems(t *testing.T) {
 					voteId2, 800000000,
 				},
 			},
-		})
-	view.entries[msg.TxIn[2].PreviousOutPoint] = txo.NewUtxoEntry(
+		}))
+	view.AddEntry(msg.TxIn[2].PreviousOutPoint, txo.NewUtxoEntry(
 		500000000,
 		nil,
 		0,
 		false,
-		&assets1,
+		&asset1,
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId1:&txo.LockEntry{
@@ -368,13 +368,13 @@ func TestConstructLockItems(t *testing.T) {
 					voteId2, 1200000000,
 				},
 			},
-		})
-	view.entries[msg.TxIn[3].PreviousOutPoint] = txo.NewUtxoEntry(
+		}))
+	view.AddEntry(msg.TxIn[3].PreviousOutPoint, txo.NewUtxoEntry(
 		220000000,
 		nil,
 		0,
 		false,
-		&assets2,
+		&asset2,
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId1:&txo.LockEntry{
@@ -384,37 +384,37 @@ func TestConstructLockItems(t *testing.T) {
 					voteId3, 300000000,
 				},
 			},
-		})
-	view.entries[msg.TxIn[4].PreviousOutPoint] = txo.NewUtxoEntry(
+		}))
+	view.AddEntry(msg.TxIn[4].PreviousOutPoint, txo.NewUtxoEntry(
 		4000000000,
 		nil,
 		0,
 		false,
-		&assets3,
+		&asset3,
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId4:&txo.LockEntry{
 					voteId4, 4000000000,
 				},
 			},
-		})
-	view.entries[msg.TxIn[5].PreviousOutPoint] = txo.NewUtxoEntry(
+		}))
+	view.AddEntry(msg.TxIn[5].PreviousOutPoint, txo.NewUtxoEntry(
 		100000000,
 		nil,
 		0,
 		false,
-		&asiutil.FlowCoinAsset,
+		&asiutil.AsimovAsset,
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				*voteIdFirst:&txo.LockEntry{
 					*voteIdFirst, 100000000,
 				},
 			},
-		})
+		}))
 
 
 	//result that we want:
-	lockItemWant := []*txo.LockItem {
+	lockItemWant := []*txo.LockItem{
 		&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				*voteIdFirst:&txo.LockEntry{
@@ -465,15 +465,15 @@ func TestConstructLockItems(t *testing.T) {
 			},
 		},
 	}
-	feeLockItemsWant := map[protos.Assets]*txo.LockItem {
-		protos.Assets{0,1}:&txo.LockItem{
+	feeLockItemsWant := map[protos.Asset]*txo.LockItem{
+		protos.Asset{0,1}:&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId2:&txo.LockEntry{
 					voteId2, 300000000,
 				},
 			},
 		},
-		protos.Assets{0,2}:&txo.LockItem{
+		protos.Asset{0,2}:&txo.LockItem{
 			map[txo.VoteId]*txo.LockEntry{
 				voteId1:&txo.LockEntry{
 					voteId1, 900000000,
@@ -482,7 +482,7 @@ func TestConstructLockItems(t *testing.T) {
 		},
 	}
 
-	lockItems, feeLockItems := view.ConstructLockItems(tx, 10)
+	lockItems, feeLockItems := view.ConstructLockItems(tx.MsgTx(), 10)
 	if len(lockItems) != len(msg.TxOut) {
 		t.Errorf("lockItems length expected %d, get %d", len(msg.TxOut), len(lockItems))
 		return

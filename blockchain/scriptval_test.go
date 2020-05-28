@@ -5,11 +5,12 @@
 package blockchain
 
 import (
-    "runtime"
-    "testing"
     "github.com/AsimovNetwork/asimov/asiutil"
+    "github.com/AsimovNetwork/asimov/blockchain/txo"
     "github.com/AsimovNetwork/asimov/protos"
     "github.com/AsimovNetwork/asimov/txscript"
+    "runtime"
+    "testing"
 )
 
 // TestCheckBlockScripts ensures that validating the all of the scripts in a
@@ -55,20 +56,20 @@ func TestCheckBlockScripts(t *testing.T) {
                     break
                 }
             }
-            normalTx, _ := chain.createNormalTx(parivateKeyList[index], protos.Assets{0, 0}, *validators[0],
+            normalTx, _ := chain.createNormalTx(parivateKeyList[index], protos.Asset{0, 0}, *validators[0],
                 2000000000, 5000000, 100000, nil)
             normalTxList = append(normalTxList, normalTx)
         }
 
         block, _, err := createAndSignBlock(netParam, accList, validators, filters, chain, epoch, slot, int32(i),
-            protos.Assets{0, 0}, 0, validators[slot], normalTxList,
+            protos.Asset{0, 0}, 0, validators[slot], normalTxList,
             0, chain.bestChain.tip())
         if err != nil {
             t.Errorf("create block error %v", err)
         }
 
         if i < 1 {
-            isMain, isOrphan, checkErr := chain.ProcessBlock(block, 0)
+            isMain, isOrphan, checkErr := chain.ProcessBlock(block, nil, 0)
             if checkErr != nil {
                 t.Errorf("ProcessBlock error %v", checkErr)
             }
@@ -79,9 +80,9 @@ func TestCheckBlockScripts(t *testing.T) {
 
     //test block with tx:
     block := blocks[1]
-    view := NewUtxoViewpoint()
+    view := txo.NewUtxoViewpoint()
     view.SetBestHash(&chain.bestChain.tip().hash)
-    err = view.fetchInputUtxos(chain.db, block)
+    err = fetchInputUtxos(view, chain.db, block)
     if err != nil {
         t.Errorf("test TestCheckBlockScripts error %v", err)
     }
