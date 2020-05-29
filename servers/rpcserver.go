@@ -13,6 +13,7 @@ import (
 	"github.com/AsimovNetwork/asimov/asiutil"
 	"github.com/AsimovNetwork/asimov/blockchain"
 	"github.com/AsimovNetwork/asimov/blockchain/txo"
+	"github.com/AsimovNetwork/asimov/cache"
 	"github.com/AsimovNetwork/asimov/chaincfg"
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/common/hexutil"
@@ -2438,6 +2439,15 @@ func (s *PublicRpcAPI) GetContractTemplateInfoByKey(key string) (interface{}, er
 		return nil, internalRPCError("error:template not found", "")
 	}
 	return result, nil
+}
+
+func (s *PublicRpcAPI) GetContractExecuteError(txid string)(interface{},error){
+	data,err:=cache.GetExecuteError(txid)
+	if err!=nil{
+		return nil,internalRPCError(err.Error(),
+			"Failed to get contract execute error")
+	}
+	return data,nil
 }
 
 func getTemplateInfoByKey(key string, s *PublicRpcAPI) (interface{}, bool) {

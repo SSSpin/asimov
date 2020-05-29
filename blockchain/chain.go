@@ -12,6 +12,7 @@ import (
 	"github.com/AsimovNetwork/asimov/ainterface"
 	"github.com/AsimovNetwork/asimov/asiutil"
 	"github.com/AsimovNetwork/asimov/blockchain/txo"
+	"github.com/AsimovNetwork/asimov/cache"
 	"github.com/AsimovNetwork/asimov/chaincfg"
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/database"
@@ -41,6 +42,11 @@ const (
 
 	// 2M limit
 	TemplateDataFieldLength int = 1 << 21
+
+)
+
+var (
+	errExecutionRevertedString     = "fvm: execution reverted"
 )
 
 // BlockLocator is used to help locate a specific block.  The algorithm for
@@ -1713,13 +1719,16 @@ func (b *BlockChain) connectContract(
 	gasPrice := fee*10000/int64(tx.MsgTx().TxContract.GasLimit)
 	context := fvm.NewFVMContext(caller, new(big.Int).SetInt64(gasPrice), block, b, view, voteValue)
 	vmenv := vm.NewFVMWithVtx(context, stateDB, chaincfg.ActiveNetParams.FvmParam, *b.GetVmConfig(), vtx)
-
+	var ret []byte
 	switch contractCode {
 	case txscript.VoteTy:
 		fallthrough
 	case txscript.CallTy:
-		leftOverGas, snapshot, err = b.executeContract(vmenv, caller, targetContractAddr, out.Data, &out.Asset, out.Value, leftOverGas)
+		ret,leftOverGas, snapshot, err = b.executeContract(vmenv, caller, targetContractAddr, out.Data, &out.Asset, out.Value, leftOverGas)
 		if err != nil {
+			if err.Error() == errExecutionRevertedString{
+				cache.PutExecuteError(tx.Hash().String(),common.Bytes2Hex(ret))
+			}
 			return
 		}
 	case txscript.TemplateTy:
@@ -1763,9 +1772,11 @@ func (b *BlockChain) executeContract(
 	callerAddr, contractAddr common.Address,
 	data []byte, asset *protos.Asset,
 	value int64,
-	gasLimit uint64) (leftOverGas uint64, snapshot int, err error) {
+	gasLimit uint64) (ret []byte,leftOverGas uint64, snapshot int, err error) {
 	t1 := time.Now()
-	_, leftOverGas, snapshot, err = vmenv.Call(vm.AccountRef(callerAddr), contractAddr, data, gasLimit, big.NewInt(value), asset, false)
+
+	ret,leftOverGas, snapshot, err = vmenv.Call(vm.AccountRef(callerAddr), contractAddr, data, gasLimit, big.NewInt(value), asset, false)
+
 	t2 := time.Now()
 
 	log.Trace("contract exec result:", leftOverGas, (t2.Nanosecond()-t1.Nanosecond())/1000000)
