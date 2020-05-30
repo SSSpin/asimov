@@ -286,6 +286,10 @@ type BlockTemplate struct {
 
 	// VBlock is a virtual block that is ready to be processed, it is mined.
 	VBlock *asiutil.VBlock
+
+	Receipts types.Receipts
+
+	Logs     []*types.Log
 }
 
 // BlkTmplGenerator provides a type that can be used to generate block templates
@@ -603,7 +607,6 @@ mempoolLoop:
 	allFees := map[protos.Asset]int64 {
 		asiutil.AsimovAsset: 0,
 	}
-	var template BlockTemplate
 	var totalGasUsed uint64
 	var receipts types.Receipts
 	var	allLogs  []*types.Log
@@ -840,8 +843,13 @@ priorityQueueLoop:
 		return nil, err
 	}
 
-	template.Block = asiutil.NewBlock(&msgBlock)
-	template.VBlock = asiutil.NewVBlock(&msgvblock, template.Block.Hash())
+	block := asiutil.NewBlock(&msgBlock)
+	template := BlockTemplate{
+		Block: block,
+		VBlock: asiutil.NewVBlock(&msgvblock, block.Hash()),
+		Receipts: receipts,
+		Logs: allLogs,
+	}
 
 	return &template, nil
 }
