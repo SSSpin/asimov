@@ -9,6 +9,7 @@ import (
 	"container/heap"
 	"github.com/AsimovNetwork/asimov/asiutil"
 	"github.com/AsimovNetwork/asimov/blockchain"
+	"github.com/AsimovNetwork/asimov/blockchain/txo"
 	"github.com/AsimovNetwork/asimov/chaincfg"
 	"github.com/AsimovNetwork/asimov/common"
 	"github.com/AsimovNetwork/asimov/common/address"
@@ -17,6 +18,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 )
 
 // TestTxPriceHeap ensures the priority queue for transaction fees and
@@ -92,25 +94,12 @@ func TestCreateCoinbaseTx(t *testing.T) {
 			&common.Address{},
 			1,
 			true,
-		}, {
-			nil,
-			1,
-			false,
-		}, {
-			nil,
-			0,
-			false,
-		}, {
-			nil,
-			math.MaxInt32,
-			false,
 		},
 	}
 
 	t.Logf("Running %d tests", len(tests))
 	for i, test := range tests {
-		coinbaseScript, err := StandardCoinbaseScript(test.height, 0)
-		_, _, err = CreateCoinbaseTx(&chaincfg.DevelopNetParams, coinbaseScript, test.height, test.validater, nil)
+		_, _, err := CreateCoinbaseTx(&chaincfg.DevelopNetParams, test.height, test.validater, nil)
 		if test.wantErr != (err != nil) {
 			t.Errorf("tests #%d error %v", i, err)
 		}
@@ -140,9 +129,9 @@ func TestNewBlockTemplate(t *testing.T) {
 
 	defer teardownFunc()
 
-	global_view := blockchain.NewUtxoViewpoint()
+	global_view := txo.NewUtxoViewpoint()
 
-	g.FetchUtxoView = func(tx *asiutil.Tx, dolock bool) (viewpoint *blockchain.UtxoViewpoint, e error) {
+	g.FetchUtxoView = func(tx *asiutil.Tx, dolock bool) (viewpoint *txo.UtxoViewpoint, e error) {
 		neededSet := make(map[protos.OutPoint]struct{})
 		prevOut := protos.OutPoint{Hash: *tx.Hash()}
 		for txOutIdx := range tx.MsgTx().TxOut {
@@ -157,14 +146,14 @@ func TestNewBlockTemplate(t *testing.T) {
 
 		// Request the utxos from the point of view of the end of the main
 		// chain.
-		view := blockchain.NewUtxoViewpoint()
+		view := txo.NewUtxoViewpoint()
 		for k, _ := range neededSet {
 			view.AddEntry(k,global_view.LookupEntry(k))
 		}
 		return view, nil
 	}
 
-	invaildAsset := protos.NewAssets(0, 0, 1)
+	invaildAsset := protos.NewAsset(0, 0, 1)
 
 	keys := []*crypto.Account{}
 	for i := 0; i < 16; i++ {
@@ -177,133 +166,133 @@ func TestNewBlockTemplate(t *testing.T) {
 	fakeTxs := TxDescList{
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("1"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("1"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8 - 1e4, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8 - 1e4, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 1},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 1, false, 0, common.HexToHash("1"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 1, false, 0, common.HexToHash("1"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 2},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e18, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("2"),
+				keys[0], 1e18, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("2"),
 			}, {
-				keys[0], 1e4, &asiutil.FlowCoinAsset, 1, false, 0, common.HexToHash("3"),
+				keys[0], 1e4, &asiutil.AsimovAsset, 1, false, 0, common.HexToHash("3"),
 			},
 		}, []*fakeOut{
 			{
-				keys[0].Address, 1e18 - 1e12, &asiutil.FlowCoinAsset,
+				keys[0].Address, 1e18 - 1e12, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 3},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1234567890, &asiutil.FlowCoinAsset, 3, false, 0, common.HexToHash("4"),
+				keys[0], 1234567890, &asiutil.AsimovAsset, 3, false, 0, common.HexToHash("4"),
 			}, {
-				keys[1], 1e6, &asiutil.FlowCoinAsset, 5, false, 0, common.HexToHash("4"),
+				keys[1], 1e6, &asiutil.AsimovAsset, 5, false, 0, common.HexToHash("4"),
 			}, {
-				keys[3], 1e4, &asiutil.FlowCoinAsset, 8, false, 0, common.HexToHash("5"),
+				keys[3], 1e4, &asiutil.AsimovAsset, 8, false, 0, common.HexToHash("5"),
 			},
 		}, []*fakeOut{
 			{
-				keys[2].Address, 1234567890 + 1e6, &asiutil.FlowCoinAsset,
+				keys[2].Address, 1234567890 + 1e6, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 4},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e4, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("5"),
+				keys[0], 1e4, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("5"),
 			},
 		}, []*fakeOut{
 			{
-				keys[0].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[0].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[2].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[2].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[1].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[1].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[0].Address, 6e3 - 1, &asiutil.FlowCoinAsset,
+				keys[0].Address, 6e3 - 1, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 5},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("6"),
+				keys[0], 1, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("6"),
 			}, {
-				keys[1], 1e6, &asiutil.FlowCoinAsset, 1, false, 0, common.HexToHash("6"),
+				keys[1], 1e6, &asiutil.AsimovAsset, 1, false, 0, common.HexToHash("6"),
 			}, {
-				keys[2], 1e4, &asiutil.FlowCoinAsset, 2, false, 0, common.HexToHash("6"),
+				keys[2], 1e4, &asiutil.AsimovAsset, 2, false, 0, common.HexToHash("6"),
 			}, {
-				keys[2], 1e4, &asiutil.FlowCoinAsset, 2, false, 0, common.HexToHash("7"),
+				keys[2], 1e4, &asiutil.AsimovAsset, 2, false, 0, common.HexToHash("7"),
 			}, {
-				keys[3], 1e4, &asiutil.FlowCoinAsset, 4, false, 0, common.HexToHash("7"),
+				keys[3], 1e4, &asiutil.AsimovAsset, 4, false, 0, common.HexToHash("7"),
 			},
 		}, []*fakeOut{
 			{
-				keys[2].Address, 1e6, &asiutil.FlowCoinAsset,
+				keys[2].Address, 1e6, &asiutil.AsimovAsset,
 			}, {
-				keys[2].Address, 1e4 - 1, &asiutil.FlowCoinAsset,
+				keys[2].Address, 1e4 - 1, &asiutil.AsimovAsset,
 			}, {
-				keys[4].Address, 1e4, &asiutil.FlowCoinAsset,
+				keys[4].Address, 1e4, &asiutil.AsimovAsset,
 			}, {
-				keys[5].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[5].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[5].Address, 1e3, &asiutil.FlowCoinAsset,
+				keys[5].Address, 1e3, &asiutil.AsimovAsset,
 			}, {
-				keys[6].Address, 8e3 - 1, &asiutil.FlowCoinAsset,
+				keys[6].Address, 8e3 - 1, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 6},
 	}
 	//create tx depend last tx
 	fakeTxs = append(fakeTxs, &TxDesc{Tx: createFakeTx([]*fakeIn{
 		{
-			keys[5], 1e3, &asiutil.FlowCoinAsset, 4, false, 0x7FFFFFFF, *fakeTxs[len(fakeTxs)-1].Tx.Hash(),
+			keys[5], 1e3, &asiutil.AsimovAsset, 4, false, 0x7FFFFFFF, *fakeTxs[len(fakeTxs)-1].Tx.Hash(),
 		},
 	}, []*fakeOut{
 		{
-			keys[0].Address, 1e3 - 2, &asiutil.FlowCoinAsset,
+			keys[0].Address, 1e3 - 2, &asiutil.AsimovAsset,
 		},
 	}, nil), GasPrice: 7})
 
 	invalidFakeTxs := TxDescList{
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("1"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("1"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8 - 1e4, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8 - 1e4, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 1},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, math.MaxUint32, true, 0, common.HexToHash("0"),
+				keys[0], 1e8, &asiutil.AsimovAsset, math.MaxUint32, true, 0, common.HexToHash("0"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8 - 1, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8 - 1, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 1},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 0, false, 0, common.HexToHash("8"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 0, false, 0, common.HexToHash("8"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8 + 1, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8 + 1, &asiutil.AsimovAsset,
 			},
 		}, global_view), GasPrice: 1},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 3, false, 0, common.HexToHash("8"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 3, false, 0, common.HexToHash("8"),
 			},
 		}, []*fakeOut{
 			{
@@ -321,18 +310,18 @@ func TestNewBlockTemplate(t *testing.T) {
 		}, global_view), GasPrice: 1},
 		{Tx: createFakeTx([]*fakeIn{
 			{
-				keys[0], 1e8, &asiutil.FlowCoinAsset, 5, false, 0, common.HexToHash("8"),
+				keys[0], 1e8, &asiutil.AsimovAsset, 5, false, 0, common.HexToHash("8"),
 			},
 		}, []*fakeOut{
 			{
-				keys[1].Address, 1e8 - 1, &asiutil.FlowCoinAsset,
+				keys[1].Address, 1e8 - 1, &asiutil.AsimovAsset,
 			},
 		}, nil), GasPrice: 1},
 	}
 
-	getFees := func(amounts int64) map[protos.Assets]int64 {
-		res := make(map[protos.Assets]int64)
-		res[asiutil.FlowCoinAsset] = amounts
+	getFees := func(amounts int64) map[protos.Asset]int64 {
+		res := make(map[protos.Asset]int64)
+		res[asiutil.AsimovAsset] = amounts
 		return res
 	}
 
@@ -347,7 +336,7 @@ func TestNewBlockTemplate(t *testing.T) {
 		slot        uint16
 		txs         TxDescList
 		wantTx      []*common.Hash
-		wantFees    map[protos.Assets]int64
+		wantFees    map[protos.Asset]int64
 		wantOpCosts []int64
 		wantWeight  uint16
 		wantErr     bool
@@ -355,7 +344,7 @@ func TestNewBlockTemplate(t *testing.T) {
 		{
 			account, 160000000, 160000000, 1, 0, TxDescList{},
 			[]*common.Hash{},
-			make(map[protos.Assets]int64),
+			make(map[protos.Asset]int64),
 			[]int64{1}, 120, false,
 		}, {
 			account, 160000000, 160000000, 1, 0, fakeTxs[0:1],
@@ -370,12 +359,12 @@ func TestNewBlockTemplate(t *testing.T) {
 		}, {
 			account, 160000000, 160000000, 1, 0, invalidFakeTxs,
 			[]*common.Hash{},
-			make(map[protos.Assets]int64),
+			make(map[protos.Asset]int64),
 			[]int64{1}, 120, false,
 		}, {
 			keys[0], 160000000, 160000000, 1, 0, TxDescList{},
 			[]*common.Hash{},
-			make(map[protos.Assets]int64),
+			make(map[protos.Asset]int64),
 			[]int64{1}, 0, true,
 		},
 	}
@@ -388,7 +377,8 @@ func TestNewBlockTemplate(t *testing.T) {
 			fakeTxSource.push(v)
 		}
 
-		block, err := g.ProduceNewBlock(test.validator, test.gasFloor, test.gasCeil, test.round, test.slot, 5*100000)
+		template, err := g.ProduceNewBlock(test.validator, test.gasFloor, test.gasCeil,
+			time.Now().Unix(), test.round, test.slot, 5*100000)
 		if err != nil {
 			if test.wantErr != true {
 				t.Errorf("tests #%d error %v", i, err)
@@ -396,6 +386,7 @@ func TestNewBlockTemplate(t *testing.T) {
 			continue
 		}
 
+		block := template.Block
 		txs := block.MsgBlock().Transactions
 
 		if block.MsgBlock().Header.CoinBase != *test.validator.Address ||
@@ -427,11 +418,11 @@ func TestNewBlockTemplate(t *testing.T) {
 			t.Errorf("tests #%d out tx error, txlen %d, want tx: %v", i, len(txs), test.wantTx)
 		}
 
-		feesEqual := func(outs []*protos.TxOut, r map[protos.Assets]int64) bool {
+		feesEqual := func(outs []*protos.TxOut, r map[protos.Asset]int64) bool {
 
 			for _, out := range outs {
-				if out.Assets != asiutil.FlowCoinAsset{
-					if out.Value != r[out.Assets]{
+				if out.Asset != asiutil.AsimovAsset {
+					if out.Value != r[out.Asset]{
 						return false
 					}
 				}

@@ -39,8 +39,8 @@ const (
 	TxTypeNormal int = 4
 )
 
-// Asimov coin assetId
-var FlowCoinAsset = protos.Assets{Property: 0, Id: 0}
+// Asimov coin asset
+var AsimovAsset = protos.Asset{}
 
 // Tx defines a bitcoin transaction that provides easier and more efficient
 // manipulation of raw transactions.  It also memorizes the hash for the
@@ -183,7 +183,6 @@ func MergeTxVtx(txs []*Tx, vtxs []*Tx) []*Tx {
 func IsMintOrCreateInput(in *protos.TxIn) bool {
 	prevOut := in.PreviousOutPoint
 	return (prevOut.Index == math.MaxUint32 || prevOut.Index == TransferCreationIdx || prevOut.Index == TransferMintIdx) && prevOut.Hash == common.Hash{}
-
 }
 
 // GenInputHash generates hash from txIn.PreviousOutPoint.Hash and txIn.PreviousOutPoint.Index
@@ -196,16 +195,4 @@ func GenInputHash(msgTx *protos.MsgTx) []byte {
 		buffer.WriteString("-")
 	}
 	return common.HashH(buffer.Bytes()).Bytes()
-}
-
-type ViewAction int
-
-const (
-	ViewAdd ViewAction = 1
-	ViewRm  ViewAction = 2
-)
-
-type TxMark struct {
-	Tx     *Tx
-	Action ViewAction
 }

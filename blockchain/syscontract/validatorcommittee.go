@@ -18,20 +18,14 @@ import (
 
 var validatorCommitteeAddress = vm.ConvertSystemContractAddress(common.ValidatorCommittee)
 
-// FeeItem defines assets and their effective heights
-type FeeItem struct {
-	Assets *protos.Assets
-	Height int32
-}
-
 // GetFees returns an asset list and their valid heights
-// assets in list are used as transaction fees
+// asset in list are used as transaction fees
 // heights describe the assets formally effective
 // the asset list is submitted by members of validator committee
 func (m *Manager) GetFees(
 	block *asiutil.Block,
 	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig) (map[protos.Assets]int32, error, uint64) {
+	chainConfig *params.ChainConfig) (map[protos.Asset]int32, error) {
 
 	officialAddr := chaincfg.OfficialAddress
 	contract := m.GetActiveContractByHeight(block.Height(), common.ValidatorCommittee)
@@ -44,11 +38,11 @@ func (m *Manager) GetFees(
 	feeListFunc := common.ContractValidatorCommittee_GetAssetFeeListFunction()
 
 	runCode, err := fvm.PackFunctionArgs(contract.AbiInfo, feeListFunc)
-	result, leftOverGas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
+	result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
 		common.SystemContractReadOnlyGas, validatorCommitteeAddress, runCode)
 	if err != nil {
 		log.Errorf("Get contract templates failed, error: %s", err)
-		return nil, err, leftOverGas
+		return nil, err
 	}
 	assets := make([]*big.Int, 0)
 	height := make([]*big.Int, 0)
@@ -59,19 +53,19 @@ func (m *Manager) GetFees(
 	err = fvm.UnPackFunctionResult(contract.AbiInfo, &outData, feeListFunc, result)
 	if err != nil {
 		log.Errorf("Get fee list failed, error: %s", err)
-		return nil, err, leftOverGas
+		return nil, err
 	}
 	if len(assets) != len(height) {
 		errStr := "get fee list failed, length of assets does not match length of height"
 		log.Errorf(errStr)
-		return nil, errors.New(errStr), leftOverGas
+		return nil, errors.New(errStr)
 	}
 
-	fees := make(map[protos.Assets]int32)
+	fees := make(map[protos.Asset]int32)
 	for i := 0; i < len(assets); i++ {
-		pAssets := protos.AssetFromBytes(assets[i].Bytes())
-		fees[*pAssets] = int32(height[i].Int64())
+		asset := protos.AssetFromBytes(assets[i].Bytes())
+		fees[*asset] = int32(height[i].Int64())
 	}
 
-	return fees, nil, leftOverGas
+	return fees, nil
 }

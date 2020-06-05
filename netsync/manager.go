@@ -7,6 +7,8 @@ package netsync
 
 import (
 	"container/list"
+	"github.com/AsimovNetwork/asimov/mining"
+	"github.com/AsimovNetwork/asimov/vm/fvm/core/types"
 	"math/rand"
 	"net"
 	"sync"
@@ -126,16 +128,20 @@ type processBlockResponse struct {
 // extra handling whereas this message essentially is just a concurrent safe
 // way to call ProcessBlock on the internal block chain instance.
 type processBlockMsg struct {
-	block *asiutil.Block
-	flags common.BehaviorFlags
-	reply chan processBlockResponse
+	block  *asiutil.Block
+	vblock *asiutil.VBlock
+	Receipts types.Receipts
+	Logs     []*types.Log
+	flags  common.BehaviorFlags
+	reply  chan processBlockResponse
 }
 
 // isCurrentMsg is a message type to be sent across the message channel for
 // requesting whether or not the sync manager believes it is synced with the
 // currently connected peers.
 type isCurrentMsg struct {
-	reply chan bool
+	checkAccept bool
+	reply       chan bool
 }
 
 // pauseMsg is a message type to be sent across the message channel for
@@ -202,6 +208,8 @@ type SyncManager struct {
 	signedHeight map[int32]interface{}
 	tipHeight    int32
 	BroadcastMessage func(msg protos.Message, exclPeers ...interface{})
+
+	isCurrent int32
 }
 
 // resetHeaderState sets the headers-first mode state to values appropriate for
@@ -664,9 +672,22 @@ func (sm *SyncManager) pushErrorMsg(peer *peerpkg.Peer, rejectMap map[common.Has
 	peer.PushRejectMsg(protos.CmdSig, code, reason, hash, false)
 }
 
-// current returns true if we believe we are synced with our peers, false if we
+//current returns the result by checkCurrent and store it.
+func (sm *SyncManager) current() bool{
+	cur := sm.checkCurrent(false)
+	if cur && sm.isCurrent == 0 {
+		atomic.StoreInt32(&sm.isCurrent,1)
+	}
+	return cur
+}
+
+func (sm *SyncManager) GetCurrent() bool{
+	return atomic.LoadInt32(&sm.isCurrent) == 1
+}
+
+// checkCurrent returns true if we believe we are synced with our peers, false if we
 // still have blocks to check
-func (sm *SyncManager) current() bool {
+func (sm *SyncManager) checkCurrent(checkAccept bool) bool {
 	if !sm.chain.IsCurrent() {
 		return false
 	}
@@ -677,9 +698,13 @@ func (sm *SyncManager) current() bool {
 		return true
 	}
 
+	if checkAccept && sm.syncPeer.LastAcceptBlock() == 0 {
+		return true
+	}
+
 	// No matter what chain thinks, if we are below the block we are syncing
 	// to we are not current.
-	if sm.syncPeer.LastAcceptBlock() > 0 && sm.chain.BestSnapshot().Height < sm.syncPeer.LastBlock() {
+	if sm.chain.BestSnapshot().Height < sm.syncPeer.LastBlock() {
 		return false
 	}
 	return true
@@ -740,15 +765,6 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 	delete(state.requestedBlocks, *blockHash)
 	delete(sm.requestedBlocks, *blockHash)
 
-	////check poa:
-	//header := bmsg.block.MsgBlock().Header
-	//if configuration.ActiveNetParams.Consensus == common.POA {
-	//	if sm.current() == true {
-	//		//record all the block header that signature confirmed:
-	//		sm.chain.AddSuspectHeader(&header)
-	//	}
-	//}
-
 	prevBlock := &bmsg.block.MsgBlock().Header.PrevBlock
 	if !sm.chain.MainChainHasBlock(prevBlock) && !sm.chain.IsCurrent() {
 		state.orphanBlocks++
@@ -761,7 +777,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 
 	// Process the block to include validation, best chain selection, orphan
 	// handling, etc.
-	_, isOrphan, err := sm.chain.ProcessBlock(bmsg.block, behaviorFlags)
+	_, isOrphan, err := sm.chain.ProcessBlock(bmsg.block, nil, nil, nil, behaviorFlags)
 	if err != nil {
 		// When the error is a rule error, it means the block was simply
 		// rejected as opposed to something actually going wrong, so logger
@@ -800,26 +816,8 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 
 	// Request the parents for the orphan block from the peer that sent it.
 	if isOrphan {
-		// We've just received an orphan block from a peer. In order
-		// to update the height of the peer, we try to extract the
-		// block height from the scriptSig of the coinbase transaction.
-		// Extraction is only attempted if the block's version is
-		// high enough (ver 2+).
-		header := &bmsg.block.MsgBlock().Header
-		if blockchain.ShouldHaveSerializedBlockHeight(header) {
-			coinbaseIdx := len(bmsg.block.Transactions()) - 1
-			coinbaseTx := bmsg.block.Transactions()[coinbaseIdx]
-			cbHeight, err := blockchain.ExtractCoinbaseHeight(coinbaseTx)
-			if err != nil {
-				log.Warnf("Unable to extract height from "+
-					"coinbase tx: %v", err)
-			} else {
-				log.Debugf("Extracted height of %v from "+
-					"orphan block", cbHeight)
-				heightUpdate = cbHeight
-				blkHashUpdate = blockHash
-			}
-		}
+		heightUpdate = bmsg.block.Height()
+		blkHashUpdate = blockHash
 
 		state.orphanBlocks++
 		if state.orphanBlocks % maxOrphanBlock == 0 {
@@ -1401,7 +1399,7 @@ out:
 			case processBlockMsg:
 				log.Debugf("processBlockMsg: Process block")
 				_, isOrphan, err := sm.chain.ProcessBlock(
-					msg.block, msg.flags)
+					msg.block, msg.vblock, msg.Receipts, msg.Logs, msg.flags)
 				log.Debugf("process result %v", err)
 				if err != nil {
 					msg.reply <- processBlockResponse{
@@ -1415,10 +1413,12 @@ out:
 					err:      nil,
 				}
 
-			//case processSigMsg:
-
 			case isCurrentMsg:
-				msg.reply <- sm.current()
+				if msg.checkAccept {
+					msg.reply <- sm.checkCurrent(true)
+				} else {
+					msg.reply <- sm.current()
+				}
 
 			case pauseMsg:
 				// Wait until the sender unpauses the manager.
@@ -1465,17 +1465,17 @@ func (sm *SyncManager) handleBlockchainNotification(notification *blockchain.Not
 
 	// A block has been connected to the main block chain.
 	case blockchain.NTBlockConnected:
-		dataarr, ok := notification.Data.(*[]interface{})
-		if !ok {
-			log.Warnf("Chain connected notification is not an array.")
+		dataarr, ok := notification.Data.([]interface{})
+		if !ok || len(dataarr) < 2 {
+			log.Warnf("Chain disconnected notification need block & vblock.")
 			break
 		}
-		block, ok := (*dataarr)[0].(*asiutil.Block)
+		block, ok := (dataarr)[0].(*asiutil.Block)
 		if !ok {
 			log.Warnf("Chain connected notification is not a block at first element.")
 			break
 		}
-		vblock, ok := (*dataarr)[1].(*asiutil.VBlock)
+		vblock, ok := (dataarr)[1].(*asiutil.VBlock)
 		if !ok {
 			log.Warnf("Chain connected notification is not a block at second element.")
 			break
@@ -1516,8 +1516,8 @@ func (sm *SyncManager) handleBlockchainNotification(notification *blockchain.Not
 	// A block has been disconnected from the main block chain.
 	case blockchain.NTBlockDisconnected:
 		blocks, ok := notification.Data.([]interface{})
-		if !ok || len(blocks) != 2 {
-			log.Warnf("Chain disconnected notification is not two block.")
+		if !ok || len(blocks) < 2 {
+			log.Warnf("Chain disconnected notification need block & vblock.")
 			break
 		}
 
@@ -1552,7 +1552,7 @@ func (sm *SyncManager) handleBlockchainNotification(notification *blockchain.Not
 			sm.txMemPool.RemoveTransaction(tx, true)
 		}
 
-		sm.sigMemPool.DisConnectSigns(block.Height())
+		sm.sigMemPool.DisConnectSigns(block.Signs(), block.Height())
 	}
 }
 
@@ -1670,9 +1670,11 @@ func (sm *SyncManager) SyncPeerID() int32 {
 
 // ProcessBlock makes use of ProcessBlock on an internal instance of a block
 // chain.
-func (sm *SyncManager) ProcessBlock(block *asiutil.Block, flags common.BehaviorFlags) (bool, error) {
+func (sm *SyncManager) ProcessBlock(template *mining.BlockTemplate, flags common.BehaviorFlags) (bool, error) {
 	reply := make(chan processBlockResponse, 1)
-	sm.msgChan <- processBlockMsg{block: block, flags: flags, reply: reply}
+	sm.msgChan <- processBlockMsg{block: template.Block, vblock: template.VBlock,
+		Receipts: template.Receipts, Logs: template.Logs,
+		flags: flags, reply: reply}
 	response := <-reply
 	return response.isOrphan, response.err
 }
@@ -1682,6 +1684,14 @@ func (sm *SyncManager) ProcessBlock(block *asiutil.Block, flags common.BehaviorF
 func (sm *SyncManager) IsCurrent() bool {
 	reply := make(chan bool)
 	sm.msgChan <- isCurrentMsg{reply: reply}
+	return <-reply
+}
+
+// IsCurrent returns whether or not the sync manager believes it is synced with
+// the connected peers or it not accepted blocks.
+func (sm *SyncManager) IsCurrentAndCheckAccepted() bool {
+	reply := make(chan bool)
+	sm.msgChan <- isCurrentMsg{checkAccept: true, reply: reply}
 	return <-reply
 }
 
@@ -1759,9 +1769,9 @@ func (sm *SyncManager) makeSignature(block *asiutil.Block) {
 		return
 	}
 	// self mined block is needn't make signature
-	//if header.CoinBase == *sm.account.Address {
-	//	return
-	//}
+	if header.CoinBase == *sm.account.Address {
+		return
+	}
 	//get the validators of current block:
 	validators, weightMap, err := sm.chain.GetValidators(header.Round)
 	if err != nil {
@@ -1779,7 +1789,7 @@ func (sm *SyncManager) makeSignature(block *asiutil.Block) {
 
 	signature, err := crypto.Sign(blockHash[:], (*ecdsa.PrivateKey)(&sm.account.PrivateKey))
 	if err != nil {
-		log.Errorf("[PoaService],Sign error:%s.", err)
+		log.Errorf("Sign error:%s.", err)
 		return
 	}
 

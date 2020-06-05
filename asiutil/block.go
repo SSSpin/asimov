@@ -24,6 +24,8 @@ func (e OutOfRangeError) Error() string {
 	return string(e)
 }
 
+var emptySign [protos.HashSignLen]byte
+
 // Block defines a bitcoin block that provides easier and more efficient
 // manipulation of raw blocks.  It also memoizes hashes for the block and its
 // transactions on their first access so subsequent accesses don't have to
@@ -41,7 +43,6 @@ type Block struct {
 
 	// balance cache for address.
 	balanceCache map[common.Address]*txo.UtxoMap
-	balanceInView map[common.Address]*txo.UtxoMap
 }
 
 // MsgBlock returns the underlying protos.MsgBlock for the Block.
@@ -227,12 +228,6 @@ func (b *Block) SetHeight(height int32) {
 	b.msgBlock.Header.Height = height
 }
 
-// ClearBalance clears balance in cache and view
-func (b *Block) ClearBalance() {
-	b.balanceCache = nil
-	b.balanceInView = nil
-}
-
 // GetBalance returns balance of target address
 func (b *Block) GetBalance(address common.Address) *txo.UtxoMap {
 	if b.balanceCache == nil {
@@ -252,23 +247,8 @@ func (b *Block) PutBalance(address common.Address, balance *txo.UtxoMap) {
 	b.balanceCache[address] = balance
 }
 
-// GetBalanceView returns balance of target address in view
-func (b *Block) GetBalanceView(address common.Address) *txo.UtxoMap {
-	if b.balanceInView == nil {
-		return nil
-	}
-	if balance, ok := b.balanceInView[address]; ok {
-		return balance
-	}
-	return nil
-}
-
-// PutBalanceView puts balance of target address into view
-func (b *Block) PutBalanceView(address common.Address, balance *txo.UtxoMap) {
-	if b.balanceInView == nil {
-		b.balanceInView = make(map[common.Address]*txo.UtxoMap)
-	}
-	b.balanceInView[address] = balance
+func (b *Block) IsSigned() bool {
+	return b.msgBlock.Header.SigData != emptySign
 }
 
 // NewBlock returns a new instance of an asimov block given an underlying

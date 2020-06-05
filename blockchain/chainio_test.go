@@ -50,95 +50,95 @@ func TestErrNotInMainChain(t *testing.T) {
 }
 
 
-var coinbaseStxo = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 1,
-	IsCoinBase:true,
-	Assets:&protos.Assets{0,0},
+var coinbaseStxo = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     1,
+	IsCoinBase: true,
+	Asset:      &protos.Asset{0,0},
 }
 
-var coinbaseStxo2 = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 2,
-	IsCoinBase:true,
-	Assets:&protos.Assets{0,0},
+var coinbaseStxo2 = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     2,
+	IsCoinBase: true,
+	Asset:      &protos.Asset{0,0},
 }
 
-var coinbaseStxo10001 = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 10001,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,1},
+var coinbaseStxo10001 = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     10001,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,1},
 }
 
-var normalStxo = SpentTxOut{
-	Amount:100000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 1,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,0},
+var normalStxo = txo.SpentTxOut{
+	Amount:     100000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     1,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,0},
 }
 
-var normalStxo2 = SpentTxOut{
-	Amount:100000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 2,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,0},
+var normalStxo2 = txo.SpentTxOut{
+	Amount:     100000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     2,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,0},
 }
 
-var normalStxo10001 = SpentTxOut{
-	Amount:100000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 10001,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,0},
+var normalStxo10001 = txo.SpentTxOut{
+	Amount:     100000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     10001,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,0},
 }
 
-var normalStxoAmount123 = SpentTxOut{
-	Amount:123,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 2,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,0},
+var normalStxoAmount123 = txo.SpentTxOut{
+	Amount:     123,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     2,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,0},
 }
 
-var normalStxoAmountMax = SpentTxOut{
-	Amount:210000000000,
-	PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-	Height: 2,
-	IsCoinBase:false,
-	Assets:&protos.Assets{0,0},
+var normalStxoAmountMax = txo.SpentTxOut{
+	Amount:     210000000000,
+	PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+	Height:     2,
+	IsCoinBase: false,
+	Asset:      &protos.Asset{0,0},
 }
 
-//spentTxOut PkScript is ScriptHash:
-var normalScriptHashStxo = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{169,21,115,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,196},
-	Height: 1,
-	IsCoinBase:true,
-	Assets:&protos.Assets{0,0},
+//txo.SpentTxOut PkScript is ScriptHash:
+var normalScriptHashStxo = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{169,21,115,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,196},
+	Height:     1,
+	IsCoinBase: true,
+	Asset:      &protos.Asset{0,0},
 }
 
-//spentTxOut PkScript is isContract:
-var contractStxo = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{194,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
-	Height: 1,
-	IsCoinBase:true,
-	Assets:&protos.Assets{0,0},
+//txo.SpentTxOut PkScript is isContract:
+var contractStxo = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{194,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
+	Height:     1,
+	IsCoinBase: true,
+	Asset:      &protos.Asset{0,0},
 }
 
-//spentTxOut PkScript is vote:
-var voteStxo = SpentTxOut{
-	Amount:500000000,
-	PkScript:[]byte{198,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
-	Height: 1,
-	IsCoinBase:true,
-	Assets:&protos.Assets{0,0},
+//txo.SpentTxOut PkScript is vote:
+var voteStxo = txo.SpentTxOut{
+	Amount:     500000000,
+	PkScript:   []byte{198,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
+	Height:     1,
+	IsCoinBase: true,
+	Asset:      &protos.Asset{0,0},
 }
 
 // TestStxoSerialization ensures serializing and deserializing spent transaction
@@ -147,7 +147,7 @@ func TestStxoSerialization(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		stxo       SpentTxOut
+		stxo       txo.SpentTxOut
 		serialized string
 	}{
 		{
@@ -191,17 +191,17 @@ func TestStxoSerialization(t *testing.T) {
 			serialized: "0x0400b4f9e43000000000e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 		{
-			name: "spentTxOut PkScript is ScriptHash",
+			name: "txo.SpentTxOut PkScript is ScriptHash",
 			stxo: normalScriptHashStxo,
 			serialized: "0x030065cd1d0000000001e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 		{
-			name: "spentTxOut PkScript is contract",
+			name: "txo.SpentTxOut PkScript is contract",
 			stxo: contractStxo,
 			serialized: "0x030065cd1d0000000006e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 		{
-			name: "spentTxOut PkScript is vote",
+			name: "txo.SpentTxOut PkScript is vote",
 			stxo: voteStxo,
 			serialized: "0x030065cd1d0000000007e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
@@ -216,19 +216,19 @@ func TestStxoSerialization(t *testing.T) {
 		gotBytesWritten := putSpentTxOut(gotSerialized, &test.stxo)
 		gotBytexHex := hexutil.Encode(gotSerialized)
 		if gotBytexHex != test.serialized {
-			t.Errorf("case %d, putSpentTxOut (%s): did not get expected bytes - got %x, want %x",
+			t.Errorf("case %d, puttxo.SpentTxOut (%s): did not get expected bytes - got %x, want %x",
 				i, test.name, gotSerialized, test.serialized)
 			continue
 		}
 		if gotBytesWritten * 2 + 2 != len(test.serialized) {
-			t.Errorf("putSpentTxOut (%s): did not get expected number of bytes written - got %d, want %d",
+			t.Errorf("puttxo.SpentTxOut (%s): did not get expected number of bytes written - got %d, want %d",
 				test.name, gotBytesWritten, len(test.serialized))
 			continue
 		}
 
 		// Ensure the serialized bytes are decoded back to the expected
 		// stxo.
-		var gotStxo SpentTxOut
+		var gotStxo txo.SpentTxOut
 		gotBytesRead, err := decodeSpentTxOut(gotSerialized, &gotStxo)
 		if err != nil {
 			t.Errorf("decodeSpentTxOut (%s): unexpected error: %v", test.name, err)
@@ -254,42 +254,42 @@ func TestStxoDecodeErrors(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		stxo       SpentTxOut
+		stxo       txo.SpentTxOut
 		serialized []byte
 		bytesRead  int // Expected number of bytes read.
 		errType    error
 	}{
 		{
 			name:       "nothing serialized",
-			stxo:       SpentTxOut{},
+			stxo:       txo.SpentTxOut{},
 			serialized: hexToBytes(""),
 			errType:    common.DeserializeError(""),
 			bytesRead:  0,
 		},
 		{
 			name:       "no data after header code w/o reserved",
-			stxo:       SpentTxOut{},
+			stxo:       txo.SpentTxOut{},
 			serialized: hexToBytes("00"),
 			errType:    common.DeserializeError(""),
 			bytesRead:  1,
 		},
 		{
 			name:       "no data after header code with reserved",
-			stxo:       SpentTxOut{},
+			stxo:       txo.SpentTxOut{},
 			serialized: hexToBytes("13"),
 			errType:    common.DeserializeError(""),
 			bytesRead:  1,
 		},
 		{
 			name:       "no data after reserved",
-			stxo:       SpentTxOut{},
+			stxo:       txo.SpentTxOut{},
 			serialized: hexToBytes("1300"),
 			errType:    common.DeserializeError(""),
 			bytesRead:  1,
 		},
 		{
 			name:       "incomplete compressed txout",
-			stxo:       SpentTxOut{},
+			stxo:       txo.SpentTxOut{},
 			serialized: hexToBytes("1332"),
 			errType:    common.DeserializeError(""),
 			bytesRead:  1,
@@ -319,7 +319,7 @@ func TestStxoDecodeErrors(t *testing.T) {
 func TestSpendJournalSerialization(t *testing.T) {
 	tests := []struct {
 		name       string
-		entry      []SpentTxOut
+		entry      []txo.SpentTxOut
 		blockTxns  []*protos.MsgTx
 		serialized string
 	}{
@@ -334,12 +334,12 @@ func TestSpendJournalSerialization(t *testing.T) {
 		//test1: input block height = 2
 		{
 			name: "One tx with one input spends last output of coinbase",
-			entry: []SpentTxOut{{
-				Amount:500000000,
-				PkScript:[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-				Height: 1,
-				IsCoinBase:true,
-				Assets:&protos.Assets{0,0},
+			entry: []txo.SpentTxOut{{
+				Amount:     500000000,
+				PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
+				Height:     1,
+				IsCoinBase: true,
+				Asset:      &protos.Asset{0,0},
 			}},
 			blockTxns: []*protos.MsgTx{{ // Coinbase omitted.
 				Version: 1,
@@ -354,11 +354,11 @@ func TestSpendJournalSerialization(t *testing.T) {
 				TxOut: []*protos.TxOut{{
 					Value:    100000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}, {
 					Value:    400000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}},
 				LockTime: 0,
 			}},
@@ -368,24 +368,24 @@ func TestSpendJournalSerialization(t *testing.T) {
 		//test2: input block height = 2
 		{
 			name: "Two txns when one spends last output, one doesn't",
-			entry: []SpentTxOut{{
+			entry: []txo.SpentTxOut{{
 				Amount:     100000000,
 				PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 				Height:     2,
 				IsCoinBase: false,
-				Assets:&protos.Assets{0,0},
+				Asset:      &protos.Asset{0,0},
 			}, {
 				Amount:     400000000,
 				PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 				Height:     2,
 				IsCoinBase: false,
-				Assets:&protos.Assets{0,0},
+				Asset:      &protos.Asset{0,0},
 			}, {
 				Amount:     500000000,
 				PkScript:   []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 				Height:     2,
 				IsCoinBase: true,
-				Assets:&protos.Assets{0,0},
+				Asset:      &protos.Asset{0,0},
 			}},
 			blockTxns: []*protos.MsgTx{{ // Coinbase omitted.
 				Version: 1,
@@ -445,10 +445,10 @@ func TestSpendJournalSerialization(t *testing.T) {
 			serialized: "0x050065cd1d0000000000e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000040084d7170000000000e3054b411051da5492aec7a823b00cb3add772d70c0000000000000000000000000400e1f5050000000000e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 
-		//test3: spentTxOut PkScript is ScriptHash:
+		//test3: txo.SpentTxOut PkScript is ScriptHash:
 		{
 			name: "One tx with one input spends last output of coinbase",
-			entry: []SpentTxOut{normalScriptHashStxo},
+			entry: []txo.SpentTxOut{normalScriptHashStxo},
 			blockTxns: []*protos.MsgTx{{ // Coinbase omitted.
 				Version: 1,
 				TxIn: []*protos.TxIn{{
@@ -462,21 +462,21 @@ func TestSpendJournalSerialization(t *testing.T) {
 				TxOut: []*protos.TxOut{{
 					Value:    100000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}, {
 					Value:    400000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}},
 				LockTime: 0,
 			}},
 			serialized: "0x030065cd1d0000000001e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 
-		//test4: spentTxOut PkScript is isContract:
+		//test4: txo.SpentTxOut PkScript is isContract:
 		{
 			name: "One tx with one input spends last output of coinbase",
-			entry: []SpentTxOut{contractStxo},
+			entry: []txo.SpentTxOut{contractStxo},
 			blockTxns: []*protos.MsgTx{{ // Coinbase omitted.
 				Version: 1,
 				TxIn: []*protos.TxIn{{
@@ -490,21 +490,21 @@ func TestSpendJournalSerialization(t *testing.T) {
 				TxOut: []*protos.TxOut{{
 					Value:    100000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}, {
 					Value:    400000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}},
 				LockTime: 0,
 			}},
 			serialized: "0x030065cd1d0000000006e3054b411051da5492aec7a823b00cb3add772d70c000000000000000000000000",
 		},
 
-		//test5: spentTxOut PkScript is isVote:
+		//test5: txo.SpentTxOut PkScript is isVote:
 		{
 			name: "One tx with one input spends last output of coinbase",
-			entry: []SpentTxOut{voteStxo},
+			entry: []txo.SpentTxOut{voteStxo},
 			blockTxns: []*protos.MsgTx{{ // Coinbase omitted.
 				Version: 1,
 				TxIn: []*protos.TxIn{{
@@ -518,11 +518,11 @@ func TestSpendJournalSerialization(t *testing.T) {
 				TxOut: []*protos.TxOut{{
 					Value:    100000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}, {
 					Value:    400000000,
 					PkScript: []byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
-					Assets: protos.Assets{0,0},
+					Asset:    protos.Asset{0,0},
 				}},
 				LockTime: 0,
 			}},
@@ -634,62 +634,62 @@ func TestUtxoSerialization(t *testing.T) {
 		[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 		1,
 		true,
-		&protos.Assets{0,0},nil)
+		&protos.Asset{0,0},nil)
 	entry1 := txo.NewUtxoEntry(
 		5000000000,
 		[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 		1,
 		true,
-		&protos.Assets{0,0},nil)
+		&protos.Asset{0,0},nil)
 	entry1.Spend()
 	entry2 := txo.NewUtxoEntry(
 		1000000,
 		[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 		100001,
 		false,
-		&protos.Assets{0,0},nil)
+		&protos.Asset{0,0},nil)
 	entry3 := txo.NewUtxoEntry(
 		1000000,
 		[]byte{118,169,21,102,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,197,172},
 		100001,
 		false,
-		&protos.Assets{0,0},nil)
+		&protos.Asset{0,0},nil)
 	entry3.Spend()
 	entry4 := txo.NewUtxoEntry(
 		2100000000000000,
 		[]byte{169,21,115,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,196},
 		1,
 		false,
-		&protos.Assets{1,1},nil)
+		&protos.Asset{1,1},nil)
 	entry5 := txo.NewUtxoEntry(
 		1000000,
 		[]byte{194,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
 		2,
 		false,
-		&protos.Assets{0,0},nil)
+		&protos.Asset{0,0},nil)
 	entry6 := txo.NewUtxoEntry(
 		1000000,[]byte{198,21,99,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215},
 		3,
 		false,
-		&protos.Assets{0,1},nil)
+		&protos.Asset{0,1},nil)
 	entry7 := txo.NewUtxoEntry(
 		100,
 		[]byte{1,2,3,4,5,6},
 		3,
 		false,
-		&protos.Assets{0,1},nil)
+		&protos.Asset{0,1},nil)
 	entry8 := txo.NewUtxoEntry(
 		100,
 		nil,
 		3,
 		false,
-		&protos.Assets{0,1},nil)
+		&protos.Asset{0,1},nil)
 	entry9 := txo.NewUtxoEntry(
 		2,
 		[]byte{169,21,115,227,5,75,65,16,81,218,84,146,174,199,168,35,176,12,179,173,215,114,215,196},
 		688,
 		false,
-		&protos.Assets{0,4294967304},nil)
+		&protos.Asset{0,4294967304},nil)
 	tests := []struct {
 		name       string
 		entry      *txo.UtxoEntry
@@ -1029,7 +1029,7 @@ func TestDbFetchBalance(t *testing.T) {
 
 		//create block:
 		block, _, err := createAndSignBlock(netParam, accList, validators, filters, chain, uint32(curEpoch),
-			uint16(curSlot), chain.bestChain.height(), protos.Assets{0,0}, 0,
+			uint16(curSlot), chain.bestChain.height(), protos.Asset{0,0}, 0,
 			validators[curSlot],nil,0,chain.bestChain.tip())
 		if err != nil {
 			t.Errorf("create block error %v", err)
@@ -1054,7 +1054,7 @@ func TestDbFetchBalance(t *testing.T) {
 		}
 
 		// Insert the block to bestChain:
-		_, isOrphan, err := chain.ProcessBlock(block, common.BFNone)
+		_, isOrphan, err := chain.ProcessBlock(block, nil, nil, nil, common.BFNone)
 		if err != nil {
 			t.Errorf("ProcessBlock err %v", err)
 		}
@@ -1096,8 +1096,8 @@ func TestDbFetchBalance(t *testing.T) {
 			for _, data := range *mp {
 				op := data.Key
 				entity := data.Value
-				log.Infof("Outpoint hash %x, its index %d, utxo amount %d, height %d, flags %d, assets %v",
-					op.Hash, op.Index, entity.Amount(), entity.BlockHeight(), entity.PackedFlags(), entity.Assets())
+				log.Infof("Outpoint hash %x, its index %d, utxo amount %d, height %d, flags %d, asset %v",
+					op.Hash, op.Index, entity.Amount(), entity.BlockHeight(), entity.PackedFlags(), entity.Asset())
 			}
 			return nil
 		})

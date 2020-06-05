@@ -17,21 +17,18 @@ Linux.
 
 ## Asimov Full Node
 
-Download the package from https://https://asimov.network/wallet , where
+Download the package from https://asimov.network/wallet , where
 there is a link named 'Download Asimov Fullnode'
 
-This zip file contains six parts
+This zip file contains eight parts
 
 - Full Node ```asimovd```
-
-- Tool ```wallet```
-
-- Readme `README.md`
-
 - Sample Configuration `asimovd.sample.conf`
-
+- genesis json `genesis.json
 - Genesis block `testnet.block`
-
+- Tool ```wallet```
+- Tool ```autotx```
+- Readme `README.md`
 - Check Sum `md5.md`
 
 ## Prepare Workspace
@@ -42,10 +39,10 @@ space.
 
 The default is ~/.asimovd on POSIX OSes, $LOCALAPPDATA/Asimovd on
 Windows, ~/Library/Application Support/Asimovd on Mac OS, and
-$home/asimovd on Plan9. Environment variables are expanded so they may
+​$home/asimovd on Plan9. Environment variables are expanded so they may
 be used.  NOTE: Windows environment variables are typically %VARIABLE%,
 but they must be accessed with $VARIABLE here. Also, ~ is expanded to
-$HOME path.
+​$HOME path.
 
 You can also use a self defined directory, which was already created.
 
@@ -70,49 +67,35 @@ stat <Your Dir>/Asimovd/asimovd.conf: no such file or directory
 `
 It means you need make a configuration file for the node.
 
+```
+cd <Your Dir>
+mkdir Asimovd
+cd Asimovd
+```
+
+copy asimovd.sample.conf, genesis.json and testnet.block file into Asimovd directory.
+
 ### Config ```asimovd.conf``` in your working path.
 
-Copy sample config file
-```sh
+```
 cp asimovd.sample.conf asimovd.conf
 ```
 
-Edit config file
+Edit asimovd.conf file as follows:
+
 ```sh
 ; devnet,testnet,regtest,simnet
 testnet=1
 ; solo,poa,satoshiplus
 consensustype=satoshiplus
 privatekey=<your_privatekey_can_generate_by_wallet>
-; rpc port
-rpclisten=:18334
 ```
-
-
-### Config ```genesis.json``` in your working path.
-
-Copy sample json file
-```sh
-cp genesis.sample.json genesis.json
-```
-
-Edit config file in testnet or mainnet, use a same value in all nodes.
-```sh
-  "collectHeight":204,
-  "chainStartTime":1576221900
-```
-
-### Copy genesis block into the working path
-
-genesis blocks are located in ./genesisbin/
 
 ## Generate your private key.
 
-Build genkeys and generate your private key
+generate your privatekey using wallet:
 
 ```sh
-cd cmd
-go build
 ./wallet -c genKey -n test
   New key pair (priv, pubkey) (format:hex)
       { 0xf57dcd236c78368d64eb455b35d98c6d676394a1bb246f88fddd4d9103132729 , 0x020e470848be43cc2a9927af3ea9919e36a1e1b3319bc3845a31e1dcb5bcde79b8 }
@@ -143,16 +126,15 @@ Same as above configuration section.
 
 ## Toolchain
 
-Clone and build
+visit online [Developer Center](https://developer.asimov.network) to use the web IDE for asimov blockchain contract development.
+
+Or clone and build source code(The code will be open source soon):
 
 ```sh
 git clone https://github.com/AsimovNetwork/developer.git
 npm install
 npm run serve
 ```
-
-Or visit online [Developer Center](https://developer.asimov.network) to use
-the web IDE for asimov blockchain contract development.
 
 
 ## Start the node

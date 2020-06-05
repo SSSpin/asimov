@@ -168,7 +168,7 @@ func TestProcessBlock(t *testing.T) {
 
 		mainChainBlock, mainChainNode, err := createAndSignBlock(
 			netParam, accList, tmpValidator, tmpFilters, chain, tmpEpoch, tmpSlotIndex, int32(i),
-			protos.Assets{0,0}, 0, tmpValidator[tmpSlotIndex],
+			protos.Asset{0,0}, 0, tmpValidator[tmpSlotIndex],
 			nil,0,mainChainBestNode)
 		if err != nil {
 			t.Errorf("create block error %v", err)
@@ -209,7 +209,7 @@ func TestProcessBlock(t *testing.T) {
 		}
 
 		sideChainBlock, sideChainNode, err := createAndSignBlock(netParam, accList, tmpValidator, tmpFilters, chain,
-			tmpEpoch, tmpSlotIndex, int32(i), protos.Assets{0,0}, 0,
+			tmpEpoch, tmpSlotIndex, int32(i), protos.Asset{0,0}, 0,
 			tmpValidator[tmpSlotIndex],nil,int32(i+1),sideChainBestNode)
 		if err != nil {
 			t.Errorf("create block error %v", err)
@@ -313,7 +313,7 @@ func TestProcessBlock(t *testing.T) {
 
 	t.Logf("Running %d TestProcessBlock tests", len(tests))
 	for i, test := range tests {
-		isMain,isOrphan,checkErr := chain.ProcessBlock(test.block,test.flags)
+		isMain,isOrphan,checkErr := chain.ProcessBlock(test.block, nil, nil, nil, test.flags)
 		if checkErr != nil {
 			if dbErr, ok := checkErr.(RuleError); !ok || dbErr.ErrorCode.String() != test.errStr {
 				t.Errorf("tests the %d error: %v", i, checkErr)

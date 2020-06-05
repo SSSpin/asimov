@@ -13,24 +13,6 @@ import (
 	"github.com/AsimovNetwork/asimov/vm/fvm/params"
 )
 
-const (
-	TEMPLATE_STATUS_SUBMIT   uint8 = 0
-	TEMPLATE_STATUS_APPROVE  uint8 = 1
-	TEMPLATE_STATUS_NOTEXIST uint8 = 2
-	TEMPLATE_STATUS_DISABLE  uint8 = 3
-)
-
-type TemplateContract interface {
-	CheckInstance(
-		b *BlockChain,
-		header *protos.BlockHeader,
-		stateDB vm.StateDB,
-		chainConfig *params.ChainConfig,
-		name string,
-		byteCode []byte,
-	) bool
-}
-
 // Get template info which is stored in system registry centor
 func (b *BlockChain) GetTemplateInfo(
 	contractAddr []byte,
@@ -61,7 +43,7 @@ func (b *BlockChain) InitTemplate(
 	templateName string,
 	contractAddr common.Address,
 	gas uint64,
-	asset *protos.Assets,
+	asset *protos.Asset,
 	vmenv *vm.FVM) (error, uint64) {
 	officialAddr := chaincfg.OfficialAddress
 	runCode, err := fvm.PackFunctionArgs(common.TemplateABI, common.InitTemplateFunc, category, templateName)

@@ -6,13 +6,12 @@
 package mining
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/AsimovNetwork/asimov/ainterface"
 	"github.com/AsimovNetwork/asimov/asiutil"
 	"github.com/AsimovNetwork/asimov/blockchain"
+	"github.com/AsimovNetwork/asimov/blockchain/syscontract"
 	"github.com/AsimovNetwork/asimov/blockchain/txo"
 	"github.com/AsimovNetwork/asimov/chaincfg"
 	"github.com/AsimovNetwork/asimov/common"
@@ -26,10 +25,6 @@ import (
 	"github.com/AsimovNetwork/asimov/protos"
 	"github.com/AsimovNetwork/asimov/rpcs/rpc"
 	"github.com/AsimovNetwork/asimov/txscript"
-	"github.com/AsimovNetwork/asimov/vm/fvm"
-	"github.com/AsimovNetwork/asimov/vm/fvm/core/vm"
-	"github.com/AsimovNetwork/asimov/vm/fvm/params"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,513 +39,6 @@ const (
 var (
 	defaultHomeDir = asiutil.AppDataDir("asimovd", false)
 )
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Manager defines an contract manager that manages multiple system contracts and
-// implements the blockchain.ContractManager interface so it can be seamlessly
-// plugged into normal chain processing.
-type ManagerTmp struct {
-	chain fvm.ChainContext
-	//  genesis transaction data cache
-	genesisDataCache map[common.ContractCode][]chaincfg.ContractInfo
-}
-
-// Init manager by genesis data.
-func (m *ManagerTmp) Init(chain fvm.ChainContext, dataBytes [] byte) error {
-	var cMap map[common.ContractCode][]chaincfg.ContractInfo
-	err := json.Unmarshal(dataBytes, &cMap)
-	if err != nil {
-		return err
-	}
-	m.chain = chain
-	m.genesisDataCache = cMap
-	return nil
-}
-
-// Get latest contract by height.
-func (m *ManagerTmp) GetActiveContractByHeight(height int32, delegateAddr common.ContractCode) *chaincfg.ContractInfo {
-	contracts, ok := m.genesisDataCache[delegateAddr]
-	if !ok {
-		return nil
-	}
-	for i := len(contracts) - 1; i >= 0; i-- {
-		if height >= contracts[i].BlockHeight {
-			return &contracts[i]
-		}
-	}
-	return nil
-}
-
-func NewContractManagerTmp() ainterface.ContractManager {
-	return &ManagerTmp {}
-}
-
-// Ensure the Manager type implements the blockchain.ContractManager interface.
-var _ ainterface.ContractManager = (*ManagerTmp)(nil)
-
-func (m *ManagerTmp) GetSignedUpValidators(
-	consensus common.ContractCode,
-	block *asiutil.Block,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig,
-	miners []string) ([]common.Address, []uint32, error){
-
-	gas := uint64(common.SystemContractReadOnlyGas)
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.ConsensusSatoshiPlus)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.ConsensusSatoshiPlus, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.ConsensusSatoshiPlus), contract.AbiInfo
-
-	funcName := common.ContractConsensusSatoshiPlus_GetSignupValidatorsFunction()
-	runCode, err := fvm.PackFunctionArgs(abi, funcName, miners)
-
-	result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-		gas, proxyAddr, runCode)
-	if err != nil {
-		log.Errorf("Get signed up validators failed, error: %s", err)
-		return nil, nil, err
-	}
-
-	validators := make([]common.Address,0)
-	heights := make([]*big.Int,0)
-	outData := []interface {}{
-		&validators,
-		&heights,
-	}
-
-	err = fvm.UnPackFunctionResult(abi, &outData, funcName, result)
-	if err != nil {
-		log.Errorf("Get signed up validators failed, error: %s", err)
-		return nil, nil, err
-	}
-
-	if len(validators) != len(heights) || len(miners) != len(heights) {
-		errStr := "get signed up validators failed, length of validators does not match length of height"
-		log.Errorf(errStr)
-		return nil, nil, errors.New(errStr)
-	}
-
-	height32 := make([]uint32, len(heights))
-	for i, h := range heights {
-		height := uint32(h.Int64())
-		height32[i] = height
-	}
-
-	return validators, height32, nil
-}
-
-
-func (m *ManagerTmp) GetContractAddressByAsset(
-	gas uint64,
-	block *asiutil.Block,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig,
-	assets []string) ([]common.Address, bool, uint64) {
-
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-
-	//获取发币合约地址
-	funcName := common.ContractRegistryCenter_GetOrganizationAddressesByAssetsFunction()
-	assetId := make([]uint64, 0, 1)
-	for _, asset := range assets {
-		assetBytes := common.Hex2Bytes(asset)
-		assetId = append(assetId, binary.BigEndian.Uint64(assetBytes[4:]))
-
-	}
-	runCode, err := fvm.PackFunctionArgs(abi, funcName, assetId)
-
-	result, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-		gas, proxyAddr, runCode)
-	if err != nil {
-		log.Errorf("Get  contract address of asset failed, error: %s", err)
-		return nil, false, leftOvergas
-	}
-
-	var outType []common.Address
-
-	err = fvm.UnPackFunctionResult(abi, &outType, funcName, result)
-	if err != nil {
-		log.Errorf("Get contract address of asset failed, error: %s", err)
-		return nil, false, leftOvergas
-	}
-
-	return outType, true, leftOvergas
-}
-
-func (m *ManagerTmp) GetAssetInfoByAssetId(
-	block *asiutil.Block,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig,
-	assets []string) ([]ainterface.AssetInfo, error) {
-
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-
-	//获取发币合约地址
-	funcName := common.ContractRegistryCenter_GetAssetInfoByAssetIdFunction()
-	//
-	results := make([]ainterface.AssetInfo, 0)
-	var err error
-	for _, asset := range assets {
-		assetBytes := common.Hex2Bytes(asset)
-		orgIdBytes := assetBytes[4:8]
-		assetIndexBytes := assetBytes[8:]
-
-		var orgId = binary.BigEndian.Uint32(orgIdBytes)
-		var assetIndex = binary.BigEndian.Uint32(assetIndexBytes)
-
-		runCode, err := fvm.PackFunctionArgs(abi, funcName, orgId, assetIndex)
-		result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-			common.SystemContractReadOnlyGas, proxyAddr, runCode)
-		if err != nil {
-			log.Errorf("Get  asset inf failed, error: %s", err)
-		}
-
-		var outType = &[]interface{}{new(bool), new(string), new(string), new(string), new(*big.Int), new([]*big.Int)}
-
-		err = fvm.UnPackFunctionResult(abi, outType, funcName, result)
-		if err != nil {
-			log.Errorf("Unpack asset info result failed, error: %s", err)
-		}
-
-		ret := ainterface.AssetInfo{
-			Exist:       *((*outType)[0]).(*bool),
-			Name:        *((*outType)[1]).(*string),
-			Symbol:      *((*outType)[2]).(*string),
-			Description: *((*outType)[3]).(*string),
-			Total:       (*((*outType)[4]).(**big.Int)).Uint64(),
-		}
-		history := *((*outType)[5]).(*[]*big.Int)
-
-		for _, h := range history {
-			ret.History = append(ret.History, h.Uint64())
-		}
-
-		results = append(results, ret)
-
-	}
-
-	return results, err
-}
-
-func (m *ManagerTmp) GetTemplates(
-	block *asiutil.Block,
-	gas uint64,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig,
-	getCountFunc string,
-	getTemplatesFunc string,
-	category uint16,
-	pageNo int,
-	pageSize int) (int, []ainterface.TemplateWarehouseContent, error, uint64) {
-
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.TemplateWarehouse)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.TemplateWarehouse, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.TemplateWarehouse), contract.AbiInfo
-
-	// 1、获取模板数量
-	getTemplatesCount := getCountFunc
-	runCode, err := fvm.PackFunctionArgs(abi, getTemplatesCount, category)
-	result, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig, gas,
-		proxyAddr, runCode)
-	if err != nil {
-		log.Errorf("Get contract templates failed, error: %s", err)
-		return 0, nil, err, leftOvergas
-	}
-
-	var outInt *big.Int
-	err = fvm.UnPackFunctionResult(abi, &outInt, getTemplatesCount, result)
-	if err != nil {
-		log.Errorf("Get contract templates failed, error: %s", err)
-		return 0, nil, err, leftOvergas
-	}
-	if outInt.Int64() == 0 {
-		return 0, nil, nil, leftOvergas
-	}
-
-	// 2、获取模板信息
-	template := make([]ainterface.TemplateWarehouseContent, 0)
-	getTemplate := getTemplatesFunc
-
-	// settings of Pagination
-	fromIndex := int(outInt.Int64())-pageNo*pageSize-1
-	if fromIndex < 0 {
-		return 0, nil, nil, leftOvergas
-	}
-	endIndex := fromIndex+1-pageSize
-	if endIndex < 0 {
-		endIndex = 0
-	}
-
-	for i := fromIndex; i >= endIndex; i-- {
-		runCode, err := fvm.PackFunctionArgs(abi, getTemplate, category, big.NewInt(int64(i)))
-		if err != nil {
-			log.Errorf("Get contract templates failed, error: %s", err)
-			return 0, nil, err, leftOvergas
-		}
-		ret, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-			leftOvergas, proxyAddr, runCode)
-		if err != nil {
-			log.Errorf("Get contract templates failed, error: %s", err)
-			return 0, nil, err, leftOvergas
-		}
-
-		cTime := new(big.Int)
-		var keyType [32]byte
-		outType := &[]interface{}{new(string), &keyType, &cTime, new(uint8), new(uint8), new(uint8), new(uint8)}
-		err = fvm.UnPackFunctionResult(abi, outType, getTemplate, ret)
-		if err != nil {
-			log.Errorf("Get contract template failed, index is %d, error: %s", i, err)
-			continue
-		}
-
-		name := *((*outType)[0]).(*string)
-		key := common.Bytes2Hex(keyType[:])
-		createTime := cTime.Int64()
-		approveCount := *((*outType)[3]).(*uint8)
-		rejectCount := *((*outType)[4]).(*uint8)
-		reviewers := *((*outType)[5]).(*uint8)
-		status := *((*outType)[6]).(*uint8)
-		if status != blockchain.TEMPLATE_STATUS_NOTEXIST {
-			template = append(template, ainterface.TemplateWarehouseContent{name, key, createTime, approveCount, rejectCount, reviewers, status})
-		}
-	}
-
-	return int(outInt.Int64()), template, nil, leftOvergas
-}
-
-func (m *ManagerTmp) GetTemplate(
-	block *asiutil.Block,
-	gas uint64,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig,
-	category uint16,
-	name string) (ainterface.TemplateWarehouseContent, bool, uint64) {
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.TemplateWarehouse)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.TemplateWarehouse, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.TemplateWarehouse), contract.AbiInfo
-	// 保存模板的合约的地址和ABI
-	// createTemplateAddr, _, createTemplateABI := b.GetSystemContractInfo(chaincfg.TemplateWarehouse)
-	// 通过名称获取合约的方法
-	getTemplate := common.ContractTemplateWarehouse_GetTemplateFunction()
-	runCode, err := fvm.PackFunctionArgs(abi, getTemplate, category, name)
-	if err != nil {
-		log.Errorf("Get contract template failed, error: %s", err)
-		return ainterface.TemplateWarehouseContent{}, false, gas
-	}
-	ret, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-		gas, proxyAddr, runCode)
-	if err != nil {
-		log.Errorf("Get contract template failed, error: %s", err)
-		return ainterface.TemplateWarehouseContent{}, false, leftOvergas
-	}
-
-	cTime := new(big.Int)
-	var keyType [32]byte
-	outType := &[]interface{}{new(string), &keyType, &cTime, new(uint8), new(uint8), new(uint8), new(uint8)}
-
-	err = fvm.UnPackFunctionResult(abi, outType, getTemplate, ret)
-	if err != nil {
-		log.Errorf("Get contract template failed, error: %s", err)
-		return ainterface.TemplateWarehouseContent{}, false, leftOvergas
-	}
-
-	key := common.Bytes2Hex(keyType[:])
-	createTime := cTime.Int64()
-	approveCount := *((*outType)[3]).(*uint8)
-	rejectCount := *((*outType)[4]).(*uint8)
-	reviewers := *((*outType)[5]).(*uint8)
-	status := *((*outType)[6]).(*uint8)
-	if status == blockchain.TEMPLATE_STATUS_NOTEXIST {
-		return ainterface.TemplateWarehouseContent{}, false, leftOvergas
-	}
-	return ainterface.TemplateWarehouseContent{name, key,
-		createTime, approveCount,
-		rejectCount, reviewers,
-		status},
-		true, leftOvergas
-}
-
-
-type FeeItem struct {
-	Assets   *protos.Assets
-	Height   int32
-}
-
-func (m *ManagerTmp) GetFees(
-	block *asiutil.Block,
-	stateDB vm.StateDB,
-	chainConfig *params.ChainConfig) (map[protos.Assets]int32, error, uint64) {
-
-	officialAddr := chaincfg.OfficialAddress
-	contract := m.GetActiveContractByHeight(block.Height(), common.ValidatorCommittee)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.ValidatorCommittee, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.ValidatorCommittee), contract.AbiInfo
-
-	// feelist func
-	feelistFunc := common.ContractValidatorCommittee_GetAssetFeeListFunction()
-
-	runCode, err := fvm.PackFunctionArgs(abi, feelistFunc)
-	result, leftOvergas, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain, stateDB, chainConfig,
-		common.SystemContractReadOnlyGas,
-		proxyAddr, runCode)
-	if err != nil {
-		log.Errorf("Get contract templates failed, error: %s", err)
-		return nil, err, leftOvergas
-	}
-	assets := make([]*big.Int,0)
-	height := make([]*big.Int,0)
-	outData := []interface {}{
-		&assets,
-		&height,
-	}
-	err = fvm.UnPackFunctionResult(abi, &outData, feelistFunc, result)
-	if err != nil {
-		log.Errorf("Get fee list failed, error: %s", err)
-		return nil, err, leftOvergas
-	}
-	if len(assets) != len(height) {
-		errStr := "Get fee list failed, length of assets does not match length of height"
-		log.Errorf(errStr)
-		return nil, errors.New(errStr), leftOvergas
-	}
-
-	fees := make(map[protos.Assets]int32)
-	for i := 0; i < len(assets); i++ {
-		pAssets := protos.AssetFromBytes(assets[i].Bytes())
-		fees[*pAssets] = int32(height[i].Int64())
-	}
-
-	return fees, nil, leftOvergas
-}
-
-func (m *ManagerTmp) IsLimit(block *asiutil.Block,
-	stateDB vm.StateDB, assets *protos.Assets) int {
-	officialAddr := chaincfg.OfficialAddress
-	_, organizationId, assetIndex := assets.AssetsFields()
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-	funcName := common.ContractRegistryCenter_IsRestrictedAssetFunction()
-	input, err := fvm.PackFunctionArgs(abi, funcName, organizationId, assetIndex)
-	if err != nil {
-		return -1
-	}
-
-	result, _, err := fvm.CallReadOnlyFunction(officialAddr, block, m.chain,
-		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.SystemContractReadOnlyGas, proxyAddr, input)
-	if err != nil {
-		log.Error(err)
-		return -1
-	}
-
-	var outType = &[]interface{}{new(bool), new(bool)}
-	err = fvm.UnPackFunctionResult(abi, &outType, funcName, result)
-	if err != nil {
-		log.Error(err)
-		return -1
-	}
-	if !*((*outType)[0]).(*bool) {
-		return -1
-	}
-	if *((*outType)[1]).(*bool) {
-		return 1
-	}
-	return 0
-}
-
-func (m *ManagerTmp) IsSupport(block *asiutil.Block,
-	stateDB vm.StateDB, gasLimit uint64, assets *protos.Assets, address []byte) (bool, uint64) {
-	if gasLimit < common.SupportCheckGas {
-		return false, 0
-	}
-	_, organizationId, assetIndex := assets.AssetsFields()
-	transferAddress := common.BytesToAddress(address)
-
-	caller := chaincfg.OfficialAddress
-
-	contract := m.GetActiveContractByHeight(block.Height(), common.RegistryCenter)
-	if contract == nil {
-		errStr := fmt.Sprintf("Failed to get active contract %s, %d", common.RegistryCenter, block.Height())
-		log.Error(errStr)
-		panic(errStr)
-	}
-	proxyAddr, abi := vm.ConvertSystemContractAddress(common.RegistryCenter), contract.AbiInfo
-	funcName := common.ContractRegistryCenter_GetOrganizationAddressByIdFunction()
-	input, err := fvm.PackFunctionArgs(abi, funcName, organizationId, assetIndex, transferAddress)
-	if err != nil {
-		return false, gasLimit
-	}
-
-	result, leftOverGas, err := fvm.CallReadOnlyFunction(caller, block, m.chain,
-		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.SupportCheckGas, proxyAddr, input)
-	if err != nil {
-		log.Error(err)
-		return false, leftOverGas
-	}
-
-	var outType common.Address
-	err = fvm.UnPackFunctionResult(abi, &outType, funcName, result)
-	if err != nil {
-		log.Error(err)
-	}
-
-	if common.EmptyAddressValue == outType.String() {
-		return false, gasLimit - common.SupportCheckGas + leftOverGas
-	}
-
-	transferInput := common.PackCanTransferInput(transferAddress, assetIndex)
-
-	result2, leftOverGas2, _ := fvm.CallReadOnlyFunction(caller, block, m.chain,
-		stateDB, chaincfg.ActiveNetParams.FvmParam,
-		common.ReadOnlyGas, outType, transferInput)
-
-	support, err := common.UnPackBoolResult(result2)
-	if err != nil {
-		log.Error(err)
-	}
-
-	return support, gasLimit - common.SupportCheckGas + leftOverGas + leftOverGas2 - common.ReadOnlyGas
-}
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type HistoryFlag byte
@@ -716,7 +204,7 @@ func (c *FakeBtcClient) GetBitcoinBlockChainInfo(result interface{}) error {
 type fakeIn struct {
 	account     *crypto.Account
 	amount      int64
-	assets      *protos.Assets
+	asset       *protos.Asset
 	index       uint32
 	coinbase    bool
 	blockHeight int32
@@ -726,14 +214,14 @@ type fakeIn struct {
 type fakeOut struct {
 	addr   *common.Address
 	amount int64
-	assets *protos.Assets
+	asset  *protos.Asset
 }
 
-func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *blockchain.UtxoViewpoint) *asiutil.Tx {
+func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *txo.UtxoViewpoint) *asiutil.Tx {
 	txMsg := protos.NewMsgTx(protos.TxVersion)
 
 	if global_view == nil {
-		global_view = blockchain.NewUtxoViewpoint()
+		global_view = txo.NewUtxoViewpoint()
 	}
 	for _, v := range vin {
 		inaddr := v.account.Address
@@ -742,13 +230,13 @@ func createFakeTx(vin []*fakeIn, vout []*fakeOut, global_view *blockchain.UtxoVi
 		txin := protos.NewTxIn(&outpoint, nil)
 		txMsg.AddTxIn(txin)
 
-		entry := txo.NewUtxoEntry(v.amount, prePkScript, v.blockHeight, v.coinbase, v.assets, nil)
+		entry := txo.NewUtxoEntry(v.amount, prePkScript, v.blockHeight, v.coinbase, v.asset, nil)
 		global_view.AddEntry(outpoint, entry)
 	}
 
 	for _, v := range vout {
 		pkScript, _ := txscript.PayToAddrScript(v.addr)
-		txout := protos.NewTxOut(v.amount, pkScript, *v.assets)
+		txout := protos.NewTxOut(v.amount, pkScript, *v.asset)
 		txMsg.AddTxOut(txout)
 	}
 
@@ -846,7 +334,7 @@ func newFakeChain(paramstmp *chaincfg.Params) (*blockchain.BlockChain, func(), e
 	roundManger := NewRoundManager()
 
 	// Create a contract manager.
-	contractManager := NewContractManagerTmp()
+	contractManager := syscontract.NewContractManager()
 
 	dir, err := os.Getwd()
 	genesisBlock, err := asiutil.LoadBlockFromFile("../genesisbin/devnet.block")
