@@ -878,6 +878,9 @@ func commit(block *protos.MsgBlock, stateDB *state.StateDB, account *crypto.Acco
 	if err != nil {
 		return err
 	}
+	if err := stateDB.Database().TrieDB().Commit(stateRoot, false); err != nil {
+		return err
+	}
 	block.Header.StateRoot = stateRoot
 
 	blockHash := block.BlockHash()
